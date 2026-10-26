@@ -6,7 +6,7 @@ Et live impostor-spill for engelskundervisning. Elevene scanner en QR-kode for �
 
 1. **Læreren** åpner `/host` og trykker **Create new game**. En QR-kode og en spillkode vises.
 2. **Elevene** scanner QR-koden, kan ta et bilde av seg selv, skriver inn navnet sitt og havner i lobbyen. Læreren ser alle som er med.
-3. Læreren trykker **Start game**, og **trykker på impostorene** i listen. Spillet krever minst én impostor, og flere crew enn impostorer.
+3. Læreren trykker **Start game**, og så **Pick impostors**. Der trykker du **Show**, velger impostorene og trykker **Save**. Spillet krever minst én impostor, og flere crew enn impostorer.
 4. Læreren trykker **Start round 1 vote**. Alle som er med får opp en liste og stemmer på den de tror er impostor. Hver har én stemme, og man kan ikke stemme på seg selv.
 5. Avstemmingen lukkes automatisk når alle har stemt. Den med flest stemmer krysses ut.
 6. **Uavgjort:** ingen blir kastet ut. Neste runde er en omavstemming (**Start runoff vote**) der bare de som sto likt kan velges. Blir også den uavgjort, er neste runde en vanlig avstemming med alle.
@@ -15,7 +15,7 @@ Et live impostor-spill for engelskundervisning. Elevene scanner en QR-kode for �
 
 Hvis noen har mistet nettet og avstemmingen står fast, trykk **Close vote now**.
 
-Impostorene vises på lærerens skjerm mens du velger dem. Når avstemmingen starter, skjules de, så du kan speile iPaden på tavla. Trykk **Show impostors** for å se dem igjen.
+Dialogen for å velge impostorer er sløret helt til du trykker **Show** (trykk **Hide** for å skjule igjen), og valget sendes først når du trykker **Save**. Impostorene vises ikke noe sted på hovedskjermen før spillet er slutt, så du kan trygt vise den på tavla.
 
 ### Bilder
 Elevene kan ta et lite bilde av seg selv (128×128 piksler) i stedet for dyre-emojien. Bildet:

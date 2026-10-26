@@ -8,9 +8,7 @@
   let info = null; // { code, secret, joinUrl, qr }
   let watcher = null;
   let lastKey = '';
-  let lastPhase = null;
-  let reveal = false; // vis impostorene mens avstemmingen pågår (iPaden kan være speilet på tavla)
-  let picking = false;
+  let picker = { open: false, shown: false, draft: new Set() }; // impostor-dialogen, skjult til læreren trykker Show
   const seen = new Set();
   let pendingSeen = [];
 
@@ -27,8 +25,7 @@
     state = null;
     photos = {};
     lastKey = '';
-    lastPhase = null;
-    reveal = false;
+    closePicker();
     try { localStorage.removeItem(STORE_KEY); } catch { /* ignorer */ }
   }
 
@@ -91,7 +88,7 @@
     return true;
   }
 
-  function playerRow(player, index, { result, pickable, showImpostors }) {
+  function playerRow(player, index, { result, showImpostors }) {
     const impostor = showImpostors && (state.impostorIds || []).includes(player.id);
     const classes = ['row'];
     if (isFresh(player.id)) classes.push('fresh');
@@ -118,9 +115,6 @@
       <div class="avatar">${avatarHtml(player)}</div>
       <div class="name"><span class="t">${esc(player.name)}</span></div>${pill}`;
 
-    if (pickable) {
-      return `<li><button type="button" class="${classes.join(' ')} pick" style="--i:${index}" data-id="${esc(player.id)}">${inner}</button></li>`;
-    }
     return `<li class="${classes.join(' ')}" style="--i:${index}">${inner}</li>`;
   }
 
@@ -136,12 +130,8 @@
     const crewWon = state.winner === 'crew';
     const tied = result && result.runoffIds ? result.runoffIds.map((id) => byId.get(id)).filter(Boolean) : [];
 
-    // Impostorene skjules som standard når avstemmingen er i gang, men vises mens du velger og når spillet er slutt.
-    if (phase !== lastPhase) {
-      if (phase === 'voting' && lastPhase === 'ready') reveal = false;
-      lastPhase = phase;
-    }
-    const showImpostors = phase === 'ready' || phase === 'over' || reveal;
+    // Impostorene vises aldri på hovedskjermen før spillet er slutt. De velges i en egen, skjult dialog.
+    const showImpostors = phase === 'over';
 
     const validPick = impostorIds.length >= 1 && impostorIds.length < state.players.length - impostorIds.length;
     const enoughToStart = state.players.length >= state.minPlayers;
@@ -149,7 +139,7 @@
 
     // Header
     if (phase === 'lobby') setHero('', `Game ${state.code}`, 'Lobby', 'Waiting for students to scan the QR code.');
-    else if (phase === 'ready') setHero('', `Game ${state.code}`, 'The game is on', 'Tap the impostors, then open the vote.');
+    else if (phase === 'ready') setHero('', `Game ${state.code}`, 'The game is on', 'Pick the impostors in secret, then open the vote.');
     else if (phase === 'voting') setHero('orange', `Game ${state.code}`, state.inRunoff ? `Round ${round} · Runoff` : `Round ${round}`, 'The vote is open.');
     else if (phase === 'result') setHero(result.eliminatedId ? 'sage' : 'orange', `Game ${state.code}`, `Round ${round}`, 'Result');
     else if (phase === 'over') setHero(crewWon ? 'sage' : 'orange', `Game ${state.code}`, crewWon ? 'Crew wins!' : 'Impostors win!', 'The game is over.');
@@ -190,14 +180,12 @@
     }
 
     // Spillerliste
-    $('list-title').textContent = phase === 'ready' ? 'Who are the impostors?' : 'Players';
-    $('list-count').textContent = phase === 'lobby'
+    $('list-title').textContent = 'Players';
+    $('list-count').textContent = phase === 'lobby' || phase === 'ready'
       ? `${state.players.length} joined`
-      : phase === 'ready'
-        ? `${impostorIds.length} picked`
-        : `${state.activeCount} left of ${state.players.length}`;
+      : `${state.activeCount} left of ${state.players.length}`;
     $('players').innerHTML = state.players
-      .map((player, index) => playerRow(player, index, { result, pickable: phase === 'ready', showImpostors }))
+      .map((player, index) => playerRow(player, index, { result, showImpostors }))
       .join('');
 
     // Knapper
@@ -208,17 +196,18 @@
     $('vote-btn').textContent = tied.length && phase === 'result' ? 'Start runoff vote' : `Start round ${round + 1} vote`;
     $('vote-btn').disabled = !canVote;
     $('close-btn').hidden = phase !== 'voting';
-    $('reveal-btn').hidden = !(phase === 'voting' || phase === 'result') || impostorIds.length === 0;
-    $('reveal-btn').textContent = reveal ? 'Hide impostors' : 'Show impostors';
+    $('imp-btn').hidden = phase !== 'ready';
+    $('imp-btn').textContent = validPick ? 'Change impostors' : 'Pick impostors';
+    $('imp-btn').classList.toggle('secondary', validPick);
     $('end-btn').hidden = finished;
     $('new-btn').hidden = !finished;
 
     let hint = '';
     if (phase === 'lobby' && !enoughToStart) hint = `You need at least ${state.minPlayers} players to start (${state.players.length}/${state.minPlayers}).`;
     else if (phase === 'ready') {
-      if (impostorIds.length === 0) hint = 'Tap the players who are the impostors.';
-      else if (!validPick) hint = 'There must be more crew than impostors.';
-      else hint = `${impostorIds.length} ${impostorIds.length === 1 ? 'impostor' : 'impostors'} picked. Start the vote when you are ready.`;
+      hint = validPick
+        ? `${impostorIds.length} ${impostorIds.length === 1 ? 'impostor' : 'impostors'} saved. They are not shown on this screen.`
+        : 'Pick the impostors first. Nobody else will see them.';
     } else if (phase === 'voting') hint = 'The vote closes by itself when everyone has voted.';
     else if (phase === 'result' && !canVote) hint = 'Not enough players are left for another vote.';
     $('action-hint').textContent = hint;
@@ -231,7 +220,7 @@
   function view() {
     if (!state || !info) return;
     const photoKey = Object.entries(photos).map(([id, photo]) => `${id}:${photo.length}`).sort().join(',');
-    const key = `${JSON.stringify(state)}|${photoKey}|${reveal}`;
+    const key = `${JSON.stringify(state)}|${photoKey}`;
     if (key === lastKey) return;
     lastKey = key;
     render();
@@ -275,32 +264,79 @@
     $('create-btn').disabled = !api.isReady;
   });
 
-  // Trykk på en spiller for å merke eller fjerne impostor. Visningen oppdateres med en gang.
-  $('players').addEventListener('click', async (event) => {
+  // Dialog for å velge impostorer. Innholdet er sløret til læreren trykker Show, og valget
+  // sendes først når læreren trykker Save. Ingenting av det vises på hovedskjermen.
+  function validDraft() {
+    const count = picker.draft.size;
+    return count >= 1 && count < state.players.length - count;
+  }
+
+  function renderPicker() {
+    $('imp-modal').hidden = !picker.open;
+    if (!picker.open || !state) return;
+    $('imp-stage').classList.toggle('blurred', !picker.shown);
+    $('imp-show').hidden = picker.shown;
+    $('imp-hide').hidden = !picker.shown;
+    // Før Show tegnes ingen valg, så ingenting kan skimtes gjennom uskarpheten.
+    $('imp-list').innerHTML = state.players.map((player, index) => {
+      const marked = picker.shown && picker.draft.has(player.id);
+      return `<li><button type="button" class="row pick${marked ? ' imp' : ''}" style="--i:${index}" data-id="${esc(player.id)}" tabindex="${picker.shown ? 0 : -1}">
+        <div class="avatar">${avatarHtml(player)}</div>
+        <div class="name"><span class="t">${esc(player.name)}</span></div>
+        ${marked ? '<span class="pill imp">🎭 Impostor</span>' : ''}</button></li>`;
+    }).join('');
+    const count = picker.draft.size;
+    if (!picker.shown) $('imp-hint').textContent = '';
+    else if (count === 0) $('imp-hint').textContent = 'Tap the players who are the impostors.';
+    else if (validDraft()) $('imp-hint').textContent = `${count} picked. Tap Save when you are done.`;
+    else $('imp-hint').textContent = 'There must be more crew than impostors.';
+    $('imp-save').disabled = !picker.shown || !validDraft();
+  }
+
+  function openPicker() {
+    picker = { open: true, shown: false, draft: new Set((state && state.impostorIds) || []) };
+    renderPicker();
+  }
+
+  function closePicker() {
+    picker = { open: false, shown: false, draft: new Set() };
+    $('imp-modal').hidden = true;
+  }
+
+  $('imp-btn').addEventListener('click', openPicker);
+  $('imp-show').addEventListener('click', () => {
+    picker.shown = true;
+    renderPicker();
+  });
+  $('imp-hide').addEventListener('click', () => {
+    picker.shown = false;
+    renderPicker();
+  });
+  $('imp-cancel').addEventListener('click', closePicker);
+  $('imp-list').addEventListener('click', (event) => {
     const button = event.target.closest('.pick');
-    if (!button || picking || !state) return;
-    picking = true;
-    const chosen = new Set(state.impostorIds || []);
-    if (chosen.has(button.dataset.id)) chosen.delete(button.dataset.id);
-    else chosen.add(button.dataset.id);
-    state.impostorIds = [...chosen];
-    view();
+    if (!button || !picker.shown) return;
+    const id = button.dataset.id;
+    if (picker.draft.has(id)) picker.draft.delete(id);
+    else picker.draft.add(id);
+    renderPicker();
+  });
+  $('imp-save').addEventListener('click', async () => {
+    if (!validDraft()) return;
+    $('imp-save').disabled = true;
     try {
-      await api.rpc('imposter_set_impostors', { p_code: info.code, p_host_secret: info.secret, p_ids: [...chosen] });
+      await api.rpc('imposter_set_impostors', { p_code: info.code, p_host_secret: info.secret, p_ids: [...picker.draft] });
+      closePicker();
     } catch (error) {
       toast(error.message);
+      renderPicker();
     }
-    picking = false;
-    watcher.refresh();
+    if (watcher) watcher.refresh();
   });
 
   $('start-btn').addEventListener('click', () => act('imposter_start_game'));
   $('vote-btn').addEventListener('click', () => act('imposter_start_vote'));
   $('close-btn').addEventListener('click', () => act('imposter_close_vote'));
-  $('reveal-btn').addEventListener('click', () => {
-    reveal = !reveal;
-    view();
-  });
   $('end-btn').addEventListener('click', () => {
     if (confirm('End the game for everyone?')) act('imposter_end_game');
   });
