@@ -4,9 +4,13 @@
   const $ = (id) => document.getElementById(id);
 
   let state = null;
+  let photos = {}; // spillerens id -> bilde, delt live og aldri lagret
   let info = null; // { code, secret, joinUrl, qr }
   let watcher = null;
   let lastKey = '';
+  let lastPhase = null;
+  let reveal = false; // vis impostorene mens avstemmingen pågår (iPaden kan være speilet på tavla)
+  let picking = false;
   const seen = new Set();
   let pendingSeen = [];
 
@@ -21,12 +25,21 @@
     watcher = null;
     info = null;
     state = null;
+    photos = {};
     lastKey = '';
+    lastPhase = null;
+    reveal = false;
     try { localStorage.removeItem(STORE_KEY); } catch { /* ignorer */ }
   }
 
   function esc(text) {
     return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // Bildet hvis spilleren har delt et, ellers emoji-avataren.
+  function avatarHtml(player) {
+    const photo = photos[player.id];
+    return photo ? `<img src="${esc(photo)}" alt="">` : esc(player.avatar);
   }
 
   let toastTimer;
@@ -48,7 +61,7 @@
   function showCreate(error = '') {
     $('screen-create').hidden = false;
     $('screen-game').hidden = true;
-    setHero('', 'Imposter', 'Create a game', 'Students scan a QR code to join.');
+    setHero('', 'Teacher view', 'Create a game', 'Students scan a QR code to join.');
     $('setup-warn').hidden = api.isReady;
     $('create-btn').disabled = !api.isReady;
     $('create-error').textContent = error;
@@ -78,10 +91,12 @@
     return true;
   }
 
-  function playerRow(player, index, result) {
+  function playerRow(player, index, { result, pickable, showImpostors }) {
+    const impostor = showImpostors && (state.impostorIds || []).includes(player.id);
     const classes = ['row'];
     if (isFresh(player.id)) classes.push('fresh');
     if (player.eliminated) classes.push('out');
+    if (impostor) classes.push('imp');
     if (!player.connected && state.phase === 'lobby') classes.push('offline');
 
     let bar = '';
@@ -96,11 +111,17 @@
     } else if (!player.connected) {
       pill = '<span class="pill soft">Offline</span>';
     }
+    if (impostor) pill += '<span class="pill imp">🎭 Impostor</span>';
 
-    return `<li class="${classes.join(' ')}" style="--i:${index}">${bar}
+    const inner = `${bar}
       <div class="num">${String(index + 1).padStart(2, '0')}</div>
-      <div class="avatar">${player.avatar}</div>
-      <div class="name">${esc(player.name)}</div>${pill}</li>`;
+      <div class="avatar">${avatarHtml(player)}</div>
+      <div class="name"><span class="t">${esc(player.name)}</span></div>${pill}`;
+
+    if (pickable) {
+      return `<li><button type="button" class="${classes.join(' ')} pick" style="--i:${index}" data-id="${esc(player.id)}">${inner}</button></li>`;
+    }
+    return `<li class="${classes.join(' ')}" style="--i:${index}">${inner}</li>`;
   }
 
   function render() {
@@ -111,15 +132,28 @@
 
     const { phase, round, result } = state;
     const byId = new Map(state.players.map((player) => [player.id, player]));
+    const impostorIds = state.impostorIds || [];
+    const crewWon = state.winner === 'crew';
+    const tied = result && result.runoffIds ? result.runoffIds.map((id) => byId.get(id)).filter(Boolean) : [];
+
+    // Impostorene skjules som standard når avstemmingen er i gang, men vises mens du velger og når spillet er slutt.
+    if (phase !== lastPhase) {
+      if (phase === 'voting' && lastPhase === 'ready') reveal = false;
+      lastPhase = phase;
+    }
+    const showImpostors = phase === 'ready' || phase === 'over' || reveal;
+
+    const validPick = impostorIds.length >= 1 && impostorIds.length < state.players.length - impostorIds.length;
     const enoughToStart = state.players.length >= state.minPlayers;
-    const canVote = state.activeCount >= 2;
+    const canVote = state.activeCount >= 2 && (phase !== 'ready' || validPick);
 
     // Header
     if (phase === 'lobby') setHero('', `Game ${state.code}`, 'Lobby', 'Waiting for students to scan the QR code.');
-    else if (phase === 'ready') setHero('', `Game ${state.code}`, 'The game is on', 'Pick the impostors, then open the vote.');
-    else if (phase === 'voting') setHero('orange', `Game ${state.code}`, `Round ${round}`, 'The vote is open.');
+    else if (phase === 'ready') setHero('', `Game ${state.code}`, 'The game is on', 'Tap the impostors, then open the vote.');
+    else if (phase === 'voting') setHero('orange', `Game ${state.code}`, state.inRunoff ? `Round ${round} · Runoff` : `Round ${round}`, 'The vote is open.');
     else if (phase === 'result') setHero(result.eliminatedId ? 'sage' : 'orange', `Game ${state.code}`, `Round ${round}`, 'Result');
-    else setHero('', `Game ${state.code}`, 'The game is over', 'Thanks for playing!');
+    else if (phase === 'over') setHero(crewWon ? 'sage' : 'orange', `Game ${state.code}`, crewWon ? 'Crew wins!' : 'Impostors win!', 'The game is over.');
+    else setHero('', `Game ${state.code}`, 'The game has ended', 'Thanks for playing!');
 
     // QR vises i lobbyen
     $('qr-block').hidden = phase !== 'lobby';
@@ -127,15 +161,25 @@
     $('qr-code').textContent = info.code;
     $('qr-url').textContent = info.joinUrl;
 
-    // Resultat
-    $('result-banner').hidden = phase !== 'result';
+    // Resultat og vinner
+    $('result-banner').hidden = phase !== 'result' && phase !== 'over';
     if (phase === 'result') {
       const out = result.eliminatedId ? byId.get(result.eliminatedId) : null;
-      $('banner-avatar').textContent = out ? out.avatar : '🤝';
-      $('banner-title').textContent = out ? `${out.name} is out!` : 'Tie';
-      $('banner-text').textContent = out
-        ? `Got the most votes (${result.counts[out.id]}) and is crossed out.`
-        : 'Nobody was voted out this round.';
+      $('banner-avatar').innerHTML = out ? avatarHtml(out) : '🤝';
+      if (out) {
+        $('banner-title').textContent = `${out.name} is out!`;
+        $('banner-text').textContent = `Got the most votes (${result.counts[out.id]}) and is crossed out.`;
+      } else if (tied.length) {
+        $('banner-title').textContent = 'Tie!';
+        $('banner-text').textContent = `Next: a runoff vote between ${tied.map((player) => player.name).join(' and ')}.`;
+      } else {
+        $('banner-title').textContent = 'Tie';
+        $('banner-text').textContent = 'Nobody was voted out this round.';
+      }
+    } else if (phase === 'over') {
+      $('banner-avatar').textContent = crewWon ? '🏆' : '🕵️';
+      $('banner-title').textContent = crewWon ? 'The crew wins!' : 'The impostors win!';
+      $('banner-text').textContent = crewWon ? 'All the impostors are out.' : 'The impostors have taken over.';
     }
 
     // Fremdrift under avstemming
@@ -146,41 +190,63 @@
     }
 
     // Spillerliste
-    $('list-title').textContent = 'Players';
+    $('list-title').textContent = phase === 'ready' ? 'Who are the impostors?' : 'Players';
     $('list-count').textContent = phase === 'lobby'
       ? `${state.players.length} joined`
-      : `${state.activeCount} left of ${state.players.length}`;
-    $('players').innerHTML = state.players.map((player, index) => playerRow(player, index, result)).join('');
+      : phase === 'ready'
+        ? `${impostorIds.length} picked`
+        : `${state.activeCount} left of ${state.players.length}`;
+    $('players').innerHTML = state.players
+      .map((player, index) => playerRow(player, index, { result, pickable: phase === 'ready', showImpostors }))
+      .join('');
 
     // Knapper
-    const ended = phase === 'ended';
+    const finished = phase === 'ended' || phase === 'over';
     $('start-btn').hidden = phase !== 'lobby';
     $('start-btn').disabled = !enoughToStart;
     $('vote-btn').hidden = phase !== 'ready' && phase !== 'result';
-    $('vote-btn').textContent = `Start round ${round + 1} vote`;
+    $('vote-btn').textContent = tied.length && phase === 'result' ? 'Start runoff vote' : `Start round ${round + 1} vote`;
     $('vote-btn').disabled = !canVote;
     $('close-btn').hidden = phase !== 'voting';
-    $('end-btn').hidden = ended;
-    $('new-btn').hidden = !ended;
+    $('reveal-btn').hidden = !(phase === 'voting' || phase === 'result') || impostorIds.length === 0;
+    $('reveal-btn').textContent = reveal ? 'Hide impostors' : 'Show impostors';
+    $('end-btn').hidden = finished;
+    $('new-btn').hidden = !finished;
 
     let hint = '';
     if (phase === 'lobby' && !enoughToStart) hint = `You need at least ${state.minPlayers} players to start (${state.players.length}/${state.minPlayers}).`;
-    else if (phase === 'voting') hint = 'The vote closes by itself when everyone has voted.';
-    else if ((phase === 'ready' || phase === 'result') && !canVote) hint = 'Not enough players are left for another vote.';
+    else if (phase === 'ready') {
+      if (impostorIds.length === 0) hint = 'Tap the players who are the impostors.';
+      else if (!validPick) hint = 'There must be more crew than impostors.';
+      else hint = `${impostorIds.length} ${impostorIds.length === 1 ? 'impostor' : 'impostors'} picked. Start the vote when you are ready.`;
+    } else if (phase === 'voting') hint = 'The vote closes by itself when everyone has voted.';
+    else if (phase === 'result' && !canVote) hint = 'Not enough players are left for another vote.';
     $('action-hint').textContent = hint;
+
     for (const key of pendingSeen) seen.add(key);
     pendingSeen = [];
   }
 
+  // Tegner bare på nytt når noe faktisk har endret seg, så animasjonene ikke starter om igjen.
+  function view() {
+    if (!state || !info) return;
+    const photoKey = Object.entries(photos).map(([id, photo]) => `${id}:${photo.length}`).sort().join(',');
+    const key = `${JSON.stringify(state)}|${photoKey}|${reveal}`;
+    if (key === lastKey) return;
+    lastKey = key;
+    render();
+  }
+
   function follow() {
     if (watcher) watcher.stop();
-    watcher = api.watchGame({ code: info.code, secret: null }, {
+    watcher = api.watchGame({ code: info.code, secret: null, hostSecret: info.secret }, {
       onState(next) {
-        const key = JSON.stringify(next);
-        if (key === lastKey) return;
-        lastKey = key;
         state = next;
-        render();
+        view();
+      },
+      onPhotos(next) {
+        photos = next;
+        view();
       },
       onGone() {
         clearCreds();
@@ -209,9 +275,32 @@
     $('create-btn').disabled = !api.isReady;
   });
 
+  // Trykk på en spiller for å merke eller fjerne impostor. Visningen oppdateres med en gang.
+  $('players').addEventListener('click', async (event) => {
+    const button = event.target.closest('.pick');
+    if (!button || picking || !state) return;
+    picking = true;
+    const chosen = new Set(state.impostorIds || []);
+    if (chosen.has(button.dataset.id)) chosen.delete(button.dataset.id);
+    else chosen.add(button.dataset.id);
+    state.impostorIds = [...chosen];
+    view();
+    try {
+      await api.rpc('imposter_set_impostors', { p_code: info.code, p_host_secret: info.secret, p_ids: [...chosen] });
+    } catch (error) {
+      toast(error.message);
+    }
+    picking = false;
+    watcher.refresh();
+  });
+
   $('start-btn').addEventListener('click', () => act('imposter_start_game'));
   $('vote-btn').addEventListener('click', () => act('imposter_start_vote'));
   $('close-btn').addEventListener('click', () => act('imposter_close_vote'));
+  $('reveal-btn').addEventListener('click', () => {
+    reveal = !reveal;
+    view();
+  });
   $('end-btn').addEventListener('click', () => {
     if (confirm('End the game for everyone?')) act('imposter_end_game');
   });

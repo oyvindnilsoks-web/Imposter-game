@@ -14,6 +14,7 @@ const PUBLIC_FUNCTIONS = new Set([
   'imposter_create_game',
   'imposter_join_game',
   'imposter_start_game',
+  'imposter_set_impostors',
   'imposter_start_vote',
   'imposter_cast_vote',
   'imposter_close_vote',
@@ -34,7 +35,9 @@ async function createLocalDatabase() {
     if (!PUBLIC_FUNCTIONS.has(name)) throw new Error(`Unknown function: ${name}`);
     const keys = Object.keys(args).filter((key) => /^p_[a-z_]+$/.test(key));
     const params = keys.map((key, index) => `${key} => $${index + 1}`).join(', ');
-    const run = queue.then(() => db.query(`select ${name}(${params}) as result`, keys.map((key) => args[key])));
+    // Lister (uuid[]) sendes som Postgres-array-tekst.
+    const values = keys.map((key) => (Array.isArray(args[key]) ? `{${args[key].join(',')}}` : args[key]));
+    const run = queue.then(() => db.query(`select ${name}(${params}) as result`, values));
     queue = run.catch(() => {});
     return run.then(({ rows }) => rows[0].result);
   }

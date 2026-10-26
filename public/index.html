@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Imposter</title>
+  <title>The Impostor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -12,7 +12,8 @@
 <body>
   <div class="app">
     <header class="hero" id="hero">
-      <div class="hero-eyebrow" id="hero-eyebrow">Imposter</div>
+      <div class="hero-brand">🎭 The Impostor</div>
+      <div class="hero-eyebrow" id="hero-eyebrow">Join with a code</div>
       <h1 id="hero-title">Join the game</h1>
       <p id="hero-sub">Enter your name to play.</p>
     </header>
@@ -25,6 +26,11 @@
         <form id="join-form" autocomplete="off">
           <label for="code">Game code</label>
           <input id="code" class="code" maxlength="4" placeholder="ABCD" autocapitalize="characters" spellcheck="false">
+          <div class="photo-pick">
+            <button type="button" class="photo-btn" id="photo-btn" aria-label="Take a photo of yourself"><span id="photo-preview">📷</span></button>
+            <div class="photo-text"><strong>Your photo</strong><span>Optional. Others see it while you play. It is never saved.</span></div>
+            <input id="photo-input" type="file" accept="image/*" capture="user" hidden>
+          </div>
           <label for="name">Your name</label>
           <input id="name" maxlength="20" placeholder="For example, Emma" autocomplete="given-name">
           <button class="btn" type="submit" id="join-btn">Join</button>
@@ -48,8 +54,8 @@
 
       <!-- Avstemming -->
       <section id="screen-vote" hidden>
-        <h2>Who is the impostor?</h2>
-        <p class="lead">You only have one vote, so choose carefully.</p>
+        <h2 id="vote-title">Who is the impostor?</h2>
+        <p class="lead" id="vote-lead">You only have one vote, so choose carefully.</p>
         <ul class="list grid" id="vote-list"></ul>
         <button class="btn" id="vote-btn" disabled>Vote</button>
       </section>

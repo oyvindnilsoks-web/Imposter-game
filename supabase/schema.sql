@@ -50,6 +50,20 @@ create table if not exists imposter_votes (
   primary key (game_code, round, voter_id)
 );
 
+-- Added later: impostors, winner and runoff votes. Safe to run again.
+alter table imposter_players add column if not exists is_impostor boolean not null default false;
+alter table imposter_games add column if not exists winner text;
+alter table imposter_games add column if not exists runoff_ids uuid[];
+alter table imposter_games add column if not exists candidate_ids uuid[];
+alter table imposter_games add column if not exists in_runoff boolean not null default false;
+
+-- Keeps the player list in the order people joined, even when two join in the same moment.
+alter table imposter_players alter column joined_at set default clock_timestamp();
+
+alter table imposter_games drop constraint if exists imposter_games_phase_check;
+alter table imposter_games add constraint imposter_games_phase_check
+  check (phase in ('lobby', 'ready', 'voting', 'result', 'over', 'ended'));
+
 -- ---------------------------------------------------------------------------
 -- Security
 -- ---------------------------------------------------------------------------
@@ -140,16 +154,23 @@ declare
   v_tie boolean;
   v_out uuid;
   v_cast integer;
+  v_runoff uuid[];
+  v_phase text := 'result';
+  v_winner text;
+  v_crew integer;
+  v_impostors integer;
   r record;
 begin
   select * into v_game from imposter_games where code = p_code;
 
+  -- Only the candidates are counted (everyone in a normal round, the tied players in a runoff).
   for r in
     select p.id,
            (select count(*) from imposter_votes v
              where v.game_code = v_game.code and v.round = v_game.round and v.target_id = p.id) as n
       from imposter_players p
      where p.game_code = v_game.code and not p.eliminated
+       and (v_game.candidate_ids is null or p.id = any(v_game.candidate_ids))
   loop
     v_counts := v_counts || jsonb_build_object(r.id::text, r.n);
     if r.n > v_max then
@@ -164,21 +185,42 @@ begin
   v_tie := v_max = 0 or coalesce(array_length(v_leaders, 1), 0) <> 1;
   v_out := case when v_tie then null else v_leaders[1] end;
 
+  -- A tie means a runoff between the tied players. A tie in the runoff itself, or no votes at all,
+  -- means nobody is out and the next vote is a normal one.
+  if v_tie and v_max > 0 and not v_game.in_runoff then
+    v_runoff := v_leaders;
+  end if;
+
   if v_out is not null then
     update imposter_players set eliminated = true where id = v_out;
+
+    -- The crew wins when all impostors are out. The impostors win when they are as many as the crew.
+    select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
+      into v_crew, v_impostors
+      from imposter_players where game_code = v_game.code and not eliminated;
+    if v_impostors = 0 then
+      v_phase := 'over';
+      v_winner := 'crew';
+    elsif v_impostors >= v_crew then
+      v_phase := 'over';
+      v_winner := 'impostors';
+    end if;
   end if;
 
   select count(*) into v_cast
     from imposter_votes where game_code = v_game.code and round = v_game.round;
 
   update imposter_games
-     set phase = 'result',
+     set phase = v_phase,
+         winner = v_winner,
+         runoff_ids = v_runoff,
          result = jsonb_build_object(
            'round', v_game.round,
            'counts', v_counts,
            'eliminatedId', v_out,
            'tie', v_tie,
-           'votesCast', v_cast
+           'votesCast', v_cast,
+           'runoffIds', to_jsonb(v_runoff)
          ),
          updated_at = now()
    where code = v_game.code;
@@ -299,7 +341,32 @@ begin
 end;
 $$;
 
--- Host: open the vote for the next round.
+-- Host: pick the impostors. Only possible before the first vote.
+create or replace function imposter_set_impostors(p_code text, p_host_secret text, p_ids uuid[])
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+  v_ids uuid[] := coalesce(p_ids, '{}');
+begin
+  if v_game.phase <> 'ready' then
+    raise exception 'You can only pick the impostors before the first vote.';
+  end if;
+  if exists (
+    select 1 from unnest(v_ids) as x(id)
+     where not exists (select 1 from imposter_players p where p.id = x.id and p.game_code = v_game.code)
+  ) then
+    raise exception 'Invalid choice.';
+  end if;
+  update imposter_players set is_impostor = (id = any(v_ids)) where game_code = v_game.code;
+  update imposter_games set updated_at = now() where code = v_game.code;
+end;
+$$;
+
+-- Host: open the vote for the next round. After a tie it is a runoff between the tied players.
 create or replace function imposter_start_vote(p_code text, p_host_secret text)
 returns void
 language plpgsql
@@ -308,15 +375,37 @@ set search_path = public
 as $$
 declare
   v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+  v_impostors integer;
+  v_crew integer;
 begin
   if v_game.phase not in ('ready', 'result') then
     raise exception 'You can''t start a vote now.';
   end if;
+
+  if v_game.phase = 'ready' then
+    select count(*) filter (where is_impostor), count(*) filter (where not is_impostor)
+      into v_impostors, v_crew
+      from imposter_players where game_code = v_game.code;
+    if v_impostors < 1 then
+      raise exception 'Pick at least one impostor first.';
+    end if;
+    if v_impostors >= v_crew then
+      raise exception 'There must be more crew than impostors.';
+    end if;
+  end if;
+
   if (select count(*) from imposter_players where game_code = v_game.code and not eliminated) < 2 then
     raise exception 'At least two players must be left to vote.';
   end if;
+
   update imposter_games
-     set phase = 'voting', round = round + 1, result = null, updated_at = now()
+     set phase = 'voting',
+         round = round + 1,
+         result = null,
+         candidate_ids = v_game.runoff_ids,
+         in_runoff = v_game.runoff_ids is not null,
+         runoff_ids = null,
+         updated_at = now()
    where code = v_game.code;
 end;
 $$;
@@ -356,6 +445,9 @@ begin
   end if;
   if v_target.id = v_voter.id then
     raise exception 'You can''t vote for yourself.';
+  end if;
+  if v_game.candidate_ids is not null and not (v_target.id = any(v_game.candidate_ids)) then
+    raise exception 'You can only vote for the players who tied.';
   end if;
 
   if exists (
@@ -415,8 +507,13 @@ $$;
 
 -- Everyone: what the screen shows. Never says who voted for whom.
 -- If p_secret belongs to a player, also returns that player's id and their own vote,
--- and counts them as online.
-create or replace function imposter_get_state(p_code text, p_secret text default null)
+-- and counts them as online. The impostors are only listed for the host, or once the game is over.
+drop function if exists imposter_get_state(text, text);
+create or replace function imposter_get_state(
+  p_code text,
+  p_secret text default null,
+  p_host_secret text default null
+)
 returns jsonb
 language plpgsql
 security definer
@@ -429,6 +526,8 @@ declare
   v_players jsonb;
   v_active integer;
   v_votes integer;
+  v_is_host boolean := false;
+  v_impostors jsonb;
 begin
   select * into v_game from imposter_games where code = upper(btrim(p_code));
   if not found then
@@ -441,9 +540,21 @@ begin
     returning id into v_me;
   end if;
 
+  if p_host_secret is not null then
+    v_is_host := exists (
+      select 1 from imposter_secrets s where s.code = v_game.code and s.host_secret = p_host_secret
+    );
+  end if;
+
   if v_me is not null and v_game.phase = 'voting' then
     select target_id into v_my_vote from imposter_votes
      where game_code = v_game.code and round = v_game.round and voter_id = v_me;
+  end if;
+
+  if v_is_host or v_game.phase = 'over' then
+    select coalesce(jsonb_agg(id order by joined_at, id), '[]'::jsonb)
+      into v_impostors
+      from imposter_players where game_code = v_game.code and is_impostor;
   end if;
 
   select coalesce(jsonb_agg(
@@ -473,6 +584,10 @@ begin
     'activeCount', v_active,
     'voteCount', v_votes,
     'result', v_game.result,
+    'winner', v_game.winner,
+    'inRunoff', v_game.in_runoff,
+    'candidateIds', to_jsonb(v_game.candidate_ids),
+    'impostorIds', v_impostors,
     'meId', v_me,
     'myVote', v_my_vote
   );
@@ -494,7 +609,8 @@ revoke all on function imposter_start_vote(text, text) from public;
 revoke all on function imposter_cast_vote(text, text, uuid) from public;
 revoke all on function imposter_close_vote(text, text) from public;
 revoke all on function imposter_end_game(text, text) from public;
-revoke all on function imposter_get_state(text, text) from public;
+revoke all on function imposter_set_impostors(text, text, uuid[]) from public;
+revoke all on function imposter_get_state(text, text, text) from public;
 
 grant execute on function imposter_create_game(text) to anon, authenticated;
 grant execute on function imposter_join_game(text, text, text) to anon, authenticated;
@@ -503,4 +619,5 @@ grant execute on function imposter_start_vote(text, text) to anon, authenticated
 grant execute on function imposter_cast_vote(text, text, uuid) to anon, authenticated;
 grant execute on function imposter_close_vote(text, text) to anon, authenticated;
 grant execute on function imposter_end_game(text, text) to anon, authenticated;
-grant execute on function imposter_get_state(text, text) to anon, authenticated;
+grant execute on function imposter_set_impostors(text, text, uuid[]) to anon, authenticated;
+grant execute on function imposter_get_state(text, text, text) to anon, authenticated;

@@ -206,7 +206,8 @@ input.code { text-align: center; text-transform: uppercase; letter-spacing: 0.4e
 .row.offline { opacity: 0.55; }
 
 .row.out .name, .row.out .num { color: var(--muted); }
-.row.out .name::after, .row.out .num::after {
+.name .t { position: relative; display: inline-block; max-width: 100%; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; }
+.row.out .name .t::after, .row.out .num::after {
   content: '';
   position: absolute;
   left: 0;
@@ -315,7 +316,7 @@ input.code { text-align: center; text-transform: uppercase; letter-spacing: 0.4e
 /* Den som er stemt ut: rister, blir grå og får navnet strøket over. */
 .row.out.fresh { animation: pop 0.45s ease backwards, shake 0.7s ease 0.9s backwards; }
 .row.out.fresh .avatar { animation: gray 0.6s ease 1.3s backwards; }
-.row.out.fresh .name::after,
+.row.out.fresh .name .t::after,
 .row.out.fresh .num::after { animation: strike 0.5s ease 1.3s backwards; }
 
 .status .avatar.big { animation: bounce-in 0.6s cubic-bezier(0.3, 1.4, 0.5, 1) backwards, float 3.2s ease-in-out 0.7s infinite; }
@@ -401,4 +402,54 @@ button, input { touch-action: manipulation; }
   .host-main .list.grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   .qr-card .qr { width: min(100%, 340px); }
   .qr-card .code { font-size: 40px; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Navn, bilder og impostorer                                         */
+/* ------------------------------------------------------------------ */
+
+.hero-brand {
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.avatar { overflow: hidden; }
+.avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+.photo-pick { display: flex; align-items: center; gap: 16px; margin: 6px 0 4px; }
+.photo-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  padding: 0;
+  font-size: 34px;
+  background: var(--sand);
+  border: 2px dashed var(--orange);
+  border-radius: 50%;
+  overflow: hidden;
+  cursor: pointer;
+}
+.photo-btn.has-photo { border-style: solid; }
+.photo-btn img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.photo-text { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--muted); }
+.photo-text strong { font-size: 15px; color: var(--ink); }
+
+.pill.imp { background: var(--danger); }
+.row.imp { border-color: var(--danger); background: #fbeee9; }
+
+.row.pick { cursor: pointer; width: 100%; font: inherit; text-align: left; color: inherit; transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease; }
+.row.pick:active { transform: scale(0.98); }
+
+@media (min-width: 700px) {
+  .hero-brand { font-size: 19px; margin-bottom: 14px; }
+  .photo-btn { width: 108px; height: 108px; font-size: 42px; }
+  .photo-text { font-size: 15px; }
+  .photo-text strong { font-size: 18px; }
+  #screen-join .photo-pick { margin-bottom: 8px; }
 }

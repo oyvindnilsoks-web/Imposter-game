@@ -1,17 +1,29 @@
-# Imposter
+# The Impostor
 
 Et live impostor-spill for engelskundervisning. Elevene scanner en QR-kode for å bli med, og læreren styrer avstemmingene. Alt elevene og du ser på skjermen er på enkel engelsk.
 
 ## Slik spiller dere
 
 1. **Læreren** åpner `/host` og trykker **Create new game**. En QR-kode og en spillkode vises.
-2. **Elevene** scanner QR-koden, skriver inn navnet sitt og havner i lobbyen. Læreren ser alle som er med.
-3. Læreren trykker **Start game**. Impostorene velges i virkeligheten (appen vet ikke hvem de er).
+2. **Elevene** scanner QR-koden, kan ta et bilde av seg selv, skriver inn navnet sitt og havner i lobbyen. Læreren ser alle som er med.
+3. Læreren trykker **Start game**, og **trykker på impostorene** i listen. Spillet krever minst én impostor, og flere crew enn impostorer.
 4. Læreren trykker **Start round 1 vote**. Alle som er med får opp en liste og stemmer på den de tror er impostor. Hver har én stemme, og man kan ikke stemme på seg selv.
-5. Avstemmingen lukkes automatisk når alle har stemt. Den med flest stemmer krysses ut. Ved uavgjort blir ingen kastet ut.
-6. Læreren trykker **Start round 2 vote**, og slik fortsetter det. Spillere som er ute kan følge med, men ikke stemme.
+5. Avstemmingen lukkes automatisk når alle har stemt. Den med flest stemmer krysses ut.
+6. **Uavgjort:** ingen blir kastet ut. Neste runde er en omavstemming (**Start runoff vote**) der bare de som sto likt kan velges. Blir også den uavgjort, er neste runde en vanlig avstemming med alle.
+7. Læreren trykker **Start round 2 vote**, og slik fortsetter det. Spillere som er ute kan følge med, men ikke stemme.
+8. **Spillet er slutt** når alle impostorene er ute (crew vinner), eller når impostorene er like mange som crew (impostorene vinner). Da vises vinneren, og alle ser hvem som var impostor.
 
 Hvis noen har mistet nettet og avstemmingen står fast, trykk **Close vote now**.
+
+Impostorene vises på lærerens skjerm mens du velger dem. Når avstemmingen starter, skjules de, så du kan speile iPaden på tavla. Trykk **Show impostors** for å se dem igjen.
+
+### Bilder
+Elevene kan ta et lite bilde av seg selv (128×128 piksler) i stedet for dyre-emojien. Bildet:
+- lagres bare i nettleseren mens fanen er åpen (`sessionStorage`), og skrives **aldri** til databasen,
+- deles med de andre spillerne via Supabase Realtime Presence, som bare holder det i minnet mens eleven er koblet til,
+- forsvinner når eleven lukker siden. Uten Realtime vises emoji som vanlig.
+
+Sjekk gjerne skolens regler for bilder av elever.
 
 ## Slik er det bygget
 
@@ -24,7 +36,7 @@ Tabeller og funksjoner heter `imposter_…`, så de kan ligge i et Supabase-pros
 
 ## Sette opp
 
-1. **Supabase:** kjør hele `supabase/schema.sql` én gang i SQL Editor. Den kan kjøres på nytt uten skade.
+1. **Supabase:** kjør hele `supabase/schema.sql` i SQL Editor. Den kan kjøres på nytt uten skade, også oppå en eldre versjon, og beholder data.
 2. **Koble siden:** legg prosjekt-URL og publiserbar nøkkel i `public/config.js`.
 3. **Netlify:** koble repoet og la innstillingene i `netlify.toml` gjelde (publiser mappen `public`, ingen byggekommando). Åpne `https://<din-side>.netlify.app/host`.
 
