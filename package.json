@@ -1,0 +1,20 @@
+{
+  "name": "imposter-game",
+  "version": "1.0.0",
+  "description": "Live impostor-spill for klassen. Elevene scanner QR-kode, og læreren styrer avstemmingene.",
+  "main": "scripts/local-server.js",
+  "private": true,
+  "scripts": {
+    "local": "node scripts/local-server.js",
+    "vendor": "node scripts/vendor.js",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
+    "@supabase/supabase-js": "^2.118.0",
+    "qrcode-generator": "^2.0.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
