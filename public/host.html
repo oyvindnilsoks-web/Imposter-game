@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="nb">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Imposter – vert</title>
+  <title>Imposter – host</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,21 +13,21 @@
   <div class="app wide">
     <header class="hero" id="hero">
       <div class="hero-eyebrow" id="hero-eyebrow">Imposter</div>
-      <h1 id="hero-title">Lag et spill</h1>
-      <p id="hero-sub">Elevene scanner en QR-kode for å bli med.</p>
+      <h1 id="hero-title">Create a game</h1>
+      <p id="hero-sub">Students scan a QR code to join.</p>
     </header>
 
     <main class="sheet">
       <!-- Før spillet er laget -->
       <section id="screen-create">
-        <h2>Klar for en runde?</h2>
-        <p class="lead">Du får en QR-kode som elevene scanner for å komme inn i lobbyen.</p>
+        <h2>Ready to play?</h2>
+        <p class="lead">You get a QR code. Students scan it to enter the lobby.</p>
         <div class="warn" id="localhost-warn" hidden>
-          Du har åpnet siden via <b>localhost</b>. Elevenes mobiler kan ikke nå den adressen.
-          Åpne siden via maskinens IP-adresse (for eksempel <b>http://192.168.1.20:3000/host</b>)
-          eller via adressen der spillet er publisert, så blir QR-koden riktig.
+          You opened this page with <b>localhost</b>. Student phones cannot reach that address.
+          Open the page with this computer's IP address (for example <b>http://192.168.1.20:3000/host</b>)
+          or with the address of the published game, so the QR code works.
         </div>
-        <button class="btn" id="create-btn">Lag nytt spill</button>
+        <button class="btn" id="create-btn">Create new game</button>
         <div class="error" id="create-error"></div>
       </section>
 
@@ -35,7 +35,7 @@
       <section id="screen-game" hidden>
         <div id="qr-block" hidden>
           <div class="qr-card">
-            <img id="qr-img" alt="QR-kode for å bli med i spillet">
+            <img id="qr-img" alt="QR code to join the game">
             <div class="code" id="qr-code"></div>
             <div class="url" id="qr-url"></div>
           </div>
@@ -50,19 +50,19 @@
         </div>
 
         <div id="vote-progress" hidden>
-          <div class="section-title">Avstemming <span id="vote-progress-text"></span></div>
+          <div class="section-title">Vote <span id="vote-progress-text"></span></div>
           <div class="progress"><div id="vote-progress-bar"></div></div>
         </div>
 
         <div class="section-title"><span id="list-title" style="font-size:18px;font-weight:600;color:inherit"></span><span id="list-count"></span></div>
         <ul class="list" id="players"></ul>
 
-        <button class="btn" id="start-btn" hidden>Start spillet</button>
+        <button class="btn" id="start-btn" hidden>Start game</button>
         <button class="btn" id="vote-btn" hidden></button>
-        <button class="btn secondary" id="close-btn" hidden>Avslutt avstemming nå</button>
+        <button class="btn secondary" id="close-btn" hidden>Close vote now</button>
         <div class="hint" id="action-hint"></div>
-        <button class="link-btn" id="end-btn" hidden>Avslutt spillet</button>
-        <button class="btn" id="new-btn" hidden>Lag nytt spill</button>
+        <button class="link-btn" id="end-btn" hidden>End game</button>
+        <button class="btn" id="new-btn" hidden>Create new game</button>
       </section>
     </main>
   </div>

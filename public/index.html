@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="nb">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -13,21 +13,21 @@
   <div class="app">
     <header class="hero" id="hero">
       <div class="hero-eyebrow" id="hero-eyebrow">Imposter</div>
-      <h1 id="hero-title">Bli med i spillet</h1>
-      <p id="hero-sub">Skriv inn navnet ditt for å være med.</p>
+      <h1 id="hero-title">Join the game</h1>
+      <p id="hero-sub">Enter your name to play.</p>
     </header>
 
     <main class="sheet">
       <!-- Bli med -->
       <section id="screen-join">
-        <h2>Hei!</h2>
-        <p class="lead">Skann QR-koden fra læreren, eller skriv inn spillkoden.</p>
+        <h2>Hi!</h2>
+        <p class="lead">Scan the QR code from your teacher, or type the game code.</p>
         <form id="join-form" autocomplete="off">
-          <label for="code">Spillkode</label>
+          <label for="code">Game code</label>
           <input id="code" class="code" maxlength="4" placeholder="ABCD" autocapitalize="characters" spellcheck="false">
-          <label for="name">Navnet ditt</label>
-          <input id="name" maxlength="20" placeholder="F.eks. Emma" autocomplete="given-name">
-          <button class="btn" type="submit" id="join-btn">Bli med</button>
+          <label for="name">Your name</label>
+          <input id="name" maxlength="20" placeholder="For example, Emma" autocomplete="given-name">
+          <button class="btn" type="submit" id="join-btn">Join</button>
         </form>
         <div class="error" id="join-error"></div>
       </section>
@@ -41,17 +41,17 @@
         </div>
         <div class="progress" id="wait-progress" hidden><div id="wait-progress-bar"></div></div>
         <div id="wait-list-wrap" hidden>
-          <div class="section-title">Spillere <span id="wait-count"></span></div>
+          <div class="section-title">Players <span id="wait-count"></span></div>
           <ul class="list" id="wait-list"></ul>
         </div>
       </section>
 
       <!-- Avstemming -->
       <section id="screen-vote" hidden>
-        <h2>Hvem er impostor?</h2>
-        <p class="lead">Du har bare én stemme, så velg med omhu.</p>
+        <h2>Who is the impostor?</h2>
+        <p class="lead">You only have one vote, so choose carefully.</p>
         <ul class="list" id="vote-list"></ul>
-        <button class="btn" id="vote-btn" disabled>Stem</button>
+        <button class="btn" id="vote-btn" disabled>Vote</button>
       </section>
 
       <!-- Resultat -->
@@ -61,7 +61,7 @@
           <h2 id="result-title"></h2>
           <p id="result-text"></p>
         </div>
-        <div class="section-title">Stemmer <span id="result-round"></span></div>
+        <div class="section-title">Votes <span id="result-round"></span></div>
         <ul class="list" id="result-list"></ul>
       </section>
     </main>

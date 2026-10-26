@@ -1,17 +1,17 @@
 # Imposter
 
-Et live impostor-spill for klassen. Elevene scanner en QR-kode for å bli med, og læreren styrer avstemmingene.
+Et live impostor-spill for engelskundervisning. Elevene scanner en QR-kode for å bli med, og læreren styrer avstemmingene. Selve spillet (det elevene og du ser på skjermen) er på enkel engelsk.
 
 ## Slik spiller dere
 
-1. **Læreren** åpner `/host` og trykker **Lag nytt spill**. En QR-kode og en spillkode vises.
+1. **Læreren** åpner `/host` og trykker **Create new game**. En QR-kode og en spillkode vises.
 2. **Elevene** scanner QR-koden, skriver inn navnet sitt og havner i lobbyen. Læreren ser alle som er med.
-3. Læreren trykker **Start spillet**. Impostorene velges i virkeligheten (appen vet ikke hvem de er).
-4. Læreren trykker **Start runde 1 avstemming**. Alle som er med får opp en liste og stemmer på den de tror er impostor. Hver har én stemme, og man kan ikke stemme på seg selv.
+3. Læreren trykker **Start game**. Impostorene velges i virkeligheten (appen vet ikke hvem de er).
+4. Læreren trykker **Start round 1 vote**. Alle som er med får opp en liste og stemmer på den de tror er impostor. Hver har én stemme, og man kan ikke stemme på seg selv.
 5. Avstemmingen lukkes automatisk når alle har stemt. Den med flest stemmer krysses ut. Ved uavgjort blir ingen kastet ut.
-6. Læreren trykker **Start runde 2 avstemming**, og slik fortsetter det. Spillere som er ute kan følge med, men ikke stemme.
+6. Læreren trykker **Start round 2 vote**, og slik fortsetter det. Spillere som er ute kan følge med, men ikke stemme.
 
-Hvis noen har mistet nettet og avstemmingen står fast, kan læreren trykke **Avslutt avstemming nå**.
+Hvis noen har mistet nettet og avstemmingen står fast, kan læreren trykke **Close vote now**.
 
 ## Kjøre spillet
 

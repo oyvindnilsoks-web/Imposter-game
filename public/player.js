@@ -59,7 +59,7 @@
     return `<li class="${classes.join(' ')}">
       ${extra.bar ? `<div class="bar" style="width:${extra.bar}%"></div>` : ''}
       <div class="avatar">${player.avatar}</div>
-      <div class="name">${esc(player.name)}${player.id === session?.playerId ? '<small>Deg</small>' : ''}</div>
+      <div class="name">${esc(player.name)}${player.id === session?.playerId ? '<small>You</small>' : ''}</div>
       ${extra.pill || ''}
     </li>`;
   }
@@ -75,7 +75,7 @@
 
     $('wait-list-wrap').hidden = !list;
     if (list) {
-      $('wait-count').textContent = `${state.players.length} med`;
+      $('wait-count').textContent = `${state.players.length} in`;
       $('wait-list').innerHTML = state.players.map((player) => playerRow(player)).join('');
     }
   }
@@ -104,16 +104,16 @@
     $('result-status').className = `status${out && out.id === self.id ? ' alert' : ''}`;
     $('result-avatar').textContent = out ? out.avatar : '🤝';
     if (out) {
-      $('result-title').textContent = out.id === self.id ? 'Du er ute!' : `${out.name} er ute!`;
+      $('result-title').textContent = out.id === self.id ? 'You are out!' : `${out.name} is out!`;
       $('result-text').textContent = out.id === self.id
-        ? 'Du fikk flest stemmer og er ute av spillet.'
-        : 'Flest stemmer. Venter på at neste runde starter.';
+        ? 'You got the most votes and are out of the game.'
+        : 'Most votes. Waiting for the next round.';
     } else {
-      $('result-title').textContent = 'Uavgjort';
-      $('result-text').textContent = 'Ingen ble stemt ut denne runden.';
+      $('result-title').textContent = 'Tie';
+      $('result-text').textContent = 'Nobody was voted out this round.';
     }
 
-    $('result-round').textContent = `Runde ${result.round}`;
+    $('result-round').textContent = `Round ${result.round}`;
     const max = Math.max(1, ...Object.values(result.counts));
     $('result-list').innerHTML = state.players
       .filter((player) => player.id in result.counts)
@@ -131,36 +131,36 @@
     if (!self) return show('join');
 
     const phase = state.phase;
-    const title = `Runde ${state.round}`;
+    const title = `Round ${state.round}`;
 
     if (phase === 'lobby') {
-      setHero('', `Spill ${state.code}`, 'Du er med!', `Hei, ${self.name}`);
-      showWait({ avatar: self.avatar, title: 'Venter på start', text: 'Læreren starter spillet snart.', list: true });
+      setHero('', `Game ${state.code}`, "You're in!", `Hi, ${self.name}`);
+      showWait({ avatar: self.avatar, title: 'Waiting to start', text: 'Your teacher will start the game soon.', list: true });
     } else if (phase === 'ready') {
-      setHero('', `Spill ${state.code}`, 'Spillet er i gang', `Hei, ${self.name}`);
-      showWait({ avatar: self.avatar, title: 'Spillet har startet', text: 'Avstemmingen åpnes av læreren.' });
+      setHero('', `Game ${state.code}`, 'The game is on', `Hi, ${self.name}`);
+      showWait({ avatar: self.avatar, title: 'The game has started', text: 'Your teacher will open the vote.' });
     } else if (phase === 'voting') {
       if (self.eliminated) {
-        setHero('orange', title, 'Avstemming', 'Du er ute av spillet');
-        showWait({ avatar: self.avatar, title: 'Du er ute', text: 'Du kan følge med mens de andre stemmer.', progress: pct() });
+        setHero('orange', title, 'Vote', 'You are out of the game');
+        showWait({ avatar: self.avatar, title: 'You are out', text: 'You can watch while the others vote.', progress: pct() });
       } else if (myVote) {
-        setHero('orange', title, 'Avstemming', 'Stemmen din er registrert');
+        setHero('orange', title, 'Vote', 'Your vote is in');
         showWait({
           avatar: '🗳️',
-          title: 'Stemme avgitt',
-          text: `${state.voteCount} av ${state.activeCount} har stemt.`,
+          title: 'Vote sent',
+          text: `${state.voteCount} of ${state.activeCount} have voted.`,
           progress: pct(),
         });
       } else {
-        setHero('orange', title, 'Avstemming', 'Hvem tror du er impostor?');
+        setHero('orange', title, 'Vote', 'Who do you think is the impostor?');
         renderVote(self);
       }
     } else if (phase === 'result') {
-      setHero(state.result.eliminatedId ? 'sage' : 'orange', title, 'Resultat', self.eliminated ? 'Du er ute av spillet' : 'Du er fortsatt med');
+      setHero(state.result.eliminatedId ? 'sage' : 'orange', title, 'Result', self.eliminated ? 'You are out of the game' : 'You are still in');
       renderResult(self);
     } else {
-      setHero('', `Spill ${state.code}`, 'Spillet er over', 'Takk for at du var med!');
-      showWait({ avatar: '🎉', title: 'Takk for spillet!', text: 'Læreren har avsluttet spillet.' });
+      setHero('', `Game ${state.code}`, 'The game is over', 'Thanks for playing!');
+      showWait({ avatar: '🎉', title: 'Thanks for playing!', text: 'Your teacher has ended the game.' });
     }
   }
 
@@ -176,7 +176,7 @@
         // Ved automatisk gjenkobling skal en død økt bare ryddes bort.
         clearSession();
         state = null;
-        setHero('', 'Imposter', 'Bli med i spillet', 'Skriv inn navnet ditt for å være med.');
+        setHero('', 'Imposter', 'Join the game', 'Enter your name to play.');
         show('join');
         $('join-btn').disabled = false;
         if (!silent) $('join-error').textContent = res.error;
@@ -210,8 +210,8 @@
     event.preventDefault();
     const code = $('code').value.trim().toUpperCase();
     const name = $('name').value.trim();
-    if (code.length !== 4) return void ($('join-error').textContent = 'Spillkoden har 4 tegn.');
-    if (!name) return void ($('join-error').textContent = 'Skriv inn et navn.');
+    if (code.length !== 4) return void ($('join-error').textContent = 'The game code has 4 characters.');
+    if (!name) return void ($('join-error').textContent = 'Please enter your name.');
     $('join-error').textContent = '';
     const previous = session && session.code === code ? session.playerId : null;
     join(code, name, previous || newPlayerId());

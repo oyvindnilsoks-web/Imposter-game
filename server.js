@@ -23,22 +23,22 @@ const sessions = new Map(); // socket.id -> { code, role, playerId? }
 
 function getRoom(code) {
   const room = rooms.get(String(code || '').trim().toUpperCase());
-  if (!room) throw new game.GameError('Fant ikke spillet. Sjekk koden.');
+  if (!room) throw new game.GameError('Game not found. Check the code.');
   room.lastActivity = Date.now();
   return room;
 }
 
 function requireHost(socket) {
   const session = sessions.get(socket.id);
-  if (!session || session.role !== 'host') throw new game.GameError('Bare verten kan gjøre dette.');
+  if (!session || session.role !== 'host') throw new game.GameError('Only the host can do this.');
   const room = getRoom(session.code);
-  if (room.hostSocketId !== socket.id) throw new game.GameError('Bare verten kan gjøre dette.');
+  if (room.hostSocketId !== socket.id) throw new game.GameError('Only the host can do this.');
   return room;
 }
 
 function requirePlayer(socket) {
   const session = sessions.get(socket.id);
-  if (!session || session.role !== 'player') throw new game.GameError('Du er ikke med i et spill.');
+  if (!session || session.role !== 'player') throw new game.GameError('You are not in a game.');
   return { room: getRoom(session.code), playerId: session.playerId };
 }
 
@@ -80,7 +80,7 @@ io.on('connection', (socket) => {
         .catch((err) => {
           const known = err instanceof game.GameError;
           if (!known) console.error(err);
-          if (typeof ack === 'function') ack({ ok: false, error: known ? err.message : 'Noe gikk galt.' });
+          if (typeof ack === 'function') ack({ ok: false, error: known ? err.message : 'Something went wrong.' });
         });
     });
   }
@@ -99,7 +99,7 @@ io.on('connection', (socket) => {
 
   on('host:resume', async ({ code, hostToken, baseUrl }) => {
     const room = getRoom(code);
-    if (!hostToken || hostToken !== room.hostToken) throw new game.GameError('Fant ikke spillet ditt lenger.');
+    if (!hostToken || hostToken !== room.hostToken) throw new game.GameError('Your game could not be found.');
     room.hostSocketId = socket.id;
     sessions.set(socket.id, { code: room.code, role: 'host' });
     socket.join(room.code);
@@ -139,7 +139,7 @@ io.on('connection', (socket) => {
   on('player:join', ({ code, name, playerId }) => {
     const room = getRoom(code);
     if (typeof playerId !== 'string' || playerId.length < 8 || playerId.length > 64) {
-      throw new game.GameError('Ugyldig spiller. Last siden på nytt.');
+      throw new game.GameError('Invalid player. Reload the page.');
     }
     game.addPlayer(room, playerId, name, socket.id);
     sessions.set(socket.id, { code: room.code, role: 'player', playerId });
@@ -179,5 +179,5 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 server.listen(PORT, () => {
-  console.log(`Imposter-spillet kjører på http://localhost:${PORT}/host`);
+  console.log(`Imposter game running at http://localhost:${PORT}/host`);
 });

@@ -12,7 +12,7 @@ function createRoomWith(count) {
 
 test('spillet krever minst tre spillere før det kan starte', () => {
   const r = createRoomWith(2);
-  assert.throws(() => room.startGame(r), /minst 3/);
+  assert.throws(() => room.startGame(r), /at least 3/);
 
   room.addPlayer(r, 'p2', 'Ola', 's2');
   room.startGame(r);
@@ -67,10 +67,10 @@ test('man kan ikke stemme på seg selv eller stemme to ganger', () => {
   room.startGame(r);
   room.startVote(r);
 
-  assert.throws(() => room.castVote(r, 'p0', 'p0'), /deg selv/);
+  assert.throws(() => room.castVote(r, 'p0', 'p0'), /yourself/);
 
   room.castVote(r, 'p0', 'p1');
-  assert.throws(() => room.castVote(r, 'p0', 'p2'), /allerede stemt/);
+  assert.throws(() => room.castVote(r, 'p0', 'p2'), /already voted/);
 });
 
 test('utkastede spillere kan ikke stemme, og neste runde ekskluderer dem', () => {
@@ -83,8 +83,8 @@ test('utkastede spillere kan ikke stemme, og neste runde ekskluderer dem', () =>
 
   room.startVote(r);
   assert.equal(r.round, 2);
-  assert.throws(() => room.castVote(r, 'p1', 'p0'), /ikke med/);
-  assert.throws(() => room.castVote(r, 'p0', 'p1'), /Ugyldig valg/);
+  assert.throws(() => room.castVote(r, 'p1', 'p0'), /not in this vote/);
+  assert.throws(() => room.castVote(r, 'p0', 'p1'), /Invalid choice/);
 
   room.castVote(r, 'p0', 'p2');
   room.castVote(r, 'p2', 'p0');
@@ -103,7 +103,7 @@ test('ny avstemming kan ikke starte når færre enn to er igjen', () => {
   assert.equal(r.players.get('p0').eliminated, true);
 
   r.players.get('p1').eliminated = true;
-  assert.throws(() => room.startVote(r), /Minst to/);
+  assert.throws(() => room.startVote(r), /At least two/);
 });
 
 test('gjenoppkobling beholder spilleren og lar den stemme videre', () => {
@@ -125,7 +125,7 @@ test('gjenoppkobling beholder spilleren og lar den stemme videre', () => {
 test('nye spillere slipper ikke inn etter at spillet har startet', () => {
   const r = createRoomWith(3);
   room.startGame(r);
-  assert.throws(() => room.addPlayer(r, 'ny', 'Sen', 'x'), /allerede startet/);
+  assert.throws(() => room.addPlayer(r, 'ny', 'Sen', 'x'), /already started/);
 });
 
 test('publicState viser ikke hvem som stemte på hvem', () => {
@@ -144,5 +144,5 @@ test('publicState viser ikke hvem som stemte på hvem', () => {
 test('navn renses og avkortes', () => {
   assert.equal(room.normalizeName('  Ola   Nordmann  '), 'Ola Nordmann');
   assert.equal(room.normalizeName('x'.repeat(50)).length, 20);
-  assert.throws(() => room.normalizeName('   '), /Skriv inn et navn/);
+  assert.throws(() => room.normalizeName('   '), /enter your name/);
 });
