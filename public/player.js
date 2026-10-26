@@ -7,6 +7,9 @@
   let state = null; // tilstanden fra databasen
   let selected = null;
   let watcher = null;
+  let lastKey = '';
+  const seen = new Set();
+  let pendingSeen = [];
   let session = loadSession(); // { code, secret, name } når jeg er med i et spill
 
   function loadSession() {
@@ -48,6 +51,7 @@
     if (watcher) watcher.stop();
     watcher = null;
     state = null;
+    lastKey = '';
     selected = null;
     setHero('', 'Imposter', 'Join the game', 'Enter your name to play.');
     show('join');
@@ -55,12 +59,21 @@
     $('join-error').textContent = api.isReady ? error : api.NOT_SET_UP;
   }
 
-  function playerRow(player, extra = {}) {
+  // Rader som vises for første gang i en fase eller runde får en liten inngangsanimasjon.
+  function isFresh(list, id) {
+    const key = `${list}:${state.phase}:${state.round}:${id}`;
+    if (seen.has(key)) return false;
+    pendingSeen.push(key);
+    return true;
+  }
+
+  function playerRow(player, index, extra = {}) {
     const classes = ['row'];
+    if (isFresh(extra.list || 'rows', player.id)) classes.push('fresh');
     if (player.id === state.meId) classes.push('me');
     if (player.eliminated) classes.push('out');
     if (!player.connected && state.phase === 'lobby') classes.push('offline');
-    return `<li class="${classes.join(' ')}">
+    return `<li class="${classes.join(' ')}" style="--i:${index}">
       ${extra.bar ? `<div class="bar" style="width:${extra.bar}%"></div>` : ''}
       <div class="avatar">${player.avatar}</div>
       <div class="name">${esc(player.name)}${player.id === state.meId ? '<small>You</small>' : ''}</div>
@@ -80,7 +93,7 @@
     $('wait-list-wrap').hidden = !list;
     if (list) {
       $('wait-count').textContent = `${state.players.length} in`;
-      $('wait-list').innerHTML = state.players.map((player) => playerRow(player)).join('');
+      $('wait-list').innerHTML = state.players.map((player, index) => playerRow(player, index, { list: 'lobby' })).join('');
     }
   }
 
@@ -90,7 +103,7 @@
     if (!candidates.some((player) => player.id === selected)) selected = null;
 
     $('vote-list').innerHTML = candidates
-      .map((player) => `<li><button class="row choice${player.id === selected ? ' selected' : ''}" data-id="${esc(player.id)}">
+      .map((player, index) => `<li><button class="row choice${isFresh('vote', player.id) ? ' fresh' : ''}${player.id === selected ? ' selected' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
         <div class="avatar">${player.avatar}</div>
         <div class="name">${esc(player.name)}</div>
         <span class="radio"></span>
@@ -122,7 +135,8 @@
     $('result-list').innerHTML = state.players
       .filter((player) => player.id in result.counts)
       .sort((a, b) => result.counts[b.id] - result.counts[a.id])
-      .map((player) => playerRow(player, {
+      .map((player, index) => playerRow(player, index, {
+        list: 'result',
         bar: (result.counts[player.id] / max) * 100,
         pill: `<span class="pill${player.id === result.eliminatedId ? ' out' : ' soft'}">${result.counts[player.id]}</span>`,
       }))
@@ -136,6 +150,7 @@
   function render() {
     const self = state && state.players.find((player) => player.id === state.meId);
     if (!self) return showJoin();
+    pendingSeen = [];
 
     const phase = state.phase;
     const title = `Round ${state.round}`;
@@ -169,12 +184,17 @@
       setHero('', `Game ${state.code}`, 'The game is over', 'Thanks for playing!');
       showWait({ avatar: '🎉', title: 'Thanks for playing!', text: 'Your teacher has ended the game.' });
     }
+    for (const key of pendingSeen) seen.add(key);
+    pendingSeen = [];
   }
 
   function follow() {
     if (watcher) watcher.stop();
     watcher = api.watchGame(session, {
       onState(next) {
+        const key = JSON.stringify(next);
+        if (key === lastKey) return;
+        lastKey = key;
         state = next;
         if (next.phase !== 'voting') selected = null;
         render();

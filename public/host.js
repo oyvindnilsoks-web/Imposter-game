@@ -6,6 +6,9 @@
   let state = null;
   let info = null; // { code, secret, joinUrl, qr }
   let watcher = null;
+  let lastKey = '';
+  const seen = new Set();
+  let pendingSeen = [];
 
   function loadCreds() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY)) || null; } catch { return null; }
@@ -18,6 +21,7 @@
     watcher = null;
     info = null;
     state = null;
+    lastKey = '';
     try { localStorage.removeItem(STORE_KEY); } catch { /* ignorer */ }
   }
 
@@ -66,8 +70,17 @@
     if (watcher) watcher.refresh();
   }
 
+  // Rader som vises for første gang i en fase eller runde får en liten inngangsanimasjon.
+  function isFresh(id) {
+    const key = `${state.phase}:${state.round}:${id}`;
+    if (seen.has(key)) return false;
+    pendingSeen.push(key);
+    return true;
+  }
+
   function playerRow(player, index, result) {
     const classes = ['row'];
+    if (isFresh(player.id)) classes.push('fresh');
     if (player.eliminated) classes.push('out');
     if (!player.connected && state.phase === 'lobby') classes.push('offline');
 
@@ -84,7 +97,7 @@
       pill = '<span class="pill soft">Offline</span>';
     }
 
-    return `<li class="${classes.join(' ')}">${bar}
+    return `<li class="${classes.join(' ')}" style="--i:${index}">${bar}
       <div class="num">${String(index + 1).padStart(2, '0')}</div>
       <div class="avatar">${player.avatar}</div>
       <div class="name">${esc(player.name)}</div>${pill}</li>`;
@@ -92,6 +105,7 @@
 
   function render() {
     if (!state || !info) return;
+    pendingSeen = [];
     $('screen-create').hidden = true;
     $('screen-game').hidden = false;
 
@@ -154,12 +168,17 @@
     else if (phase === 'voting') hint = 'The vote closes by itself when everyone has voted.';
     else if ((phase === 'ready' || phase === 'result') && !canVote) hint = 'Not enough players are left for another vote.';
     $('action-hint').textContent = hint;
+    for (const key of pendingSeen) seen.add(key);
+    pendingSeen = [];
   }
 
   function follow() {
     if (watcher) watcher.stop();
     watcher = api.watchGame({ code: info.code, secret: null }, {
       onState(next) {
+        const key = JSON.stringify(next);
+        if (key === lastKey) return;
+        lastKey = key;
         state = next;
         render();
       },

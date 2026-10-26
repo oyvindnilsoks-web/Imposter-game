@@ -205,7 +205,18 @@ input.code { text-align: center; text-transform: uppercase; letter-spacing: 0.4e
 .row.me { border-color: var(--orange); }
 .row.offline { opacity: 0.55; }
 
-.row.out .name, .row.out .num { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--muted); }
+.row.out .name, .row.out .num { color: var(--muted); }
+.row.out .name::after, .row.out .num::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 52%;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+  transform-origin: left;
+}
 .row.out .avatar { filter: grayscale(1); opacity: 0.6; }
 
 .pill {
@@ -264,4 +275,130 @@ input.code { text-align: center; text-transform: uppercase; letter-spacing: 0.4e
   transform: translateX(-50%);
   box-shadow: var(--shadow);
   z-index: 10;
+}
+
+/* ------------------------------------------------------------------ */
+/* Animasjoner                                                        */
+/* ------------------------------------------------------------------ */
+
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes pop { from { opacity: 0; transform: translateY(12px) scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes strike { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes bounce-in { 0% { opacity: 0; transform: scale(0.4); } 60% { opacity: 1; transform: scale(1.14); } 100% { transform: scale(1); } }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-9px) rotate(-5deg); } 40% { transform: translateX(9px) rotate(5deg); } 60% { transform: translateX(-6px); } 80% { transform: translateX(6px); } }
+@keyframes gray { from { filter: none; opacity: 1; } to { filter: grayscale(1); opacity: 0.6; } }
+@keyframes drift { from { transform: translateX(0); } to { transform: translateX(-26px); } }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes check { 0% { transform: scale(0.6); } 60% { transform: scale(1.3); } 100% { transform: scale(1); } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 18px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+.hero::before { animation: drift 9s ease-in-out infinite alternate; }
+
+/* Nye skjermer og blokker glir inn. Animasjonen starter hver gang elementet vises. */
+.sheet > section:not([hidden]),
+#qr-block:not([hidden]),
+#result-banner:not([hidden]),
+#vote-progress:not([hidden]) { animation: rise 0.45s ease backwards; }
+
+/* Rader dukker opp etter hverandre, men bare første gang de vises. */
+.row.fresh {
+  animation: pop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) backwards;
+  animation-delay: calc(min(var(--i, 0), 14) * 45ms);
+}
+.row.fresh .bar {
+  animation: grow 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  animation-delay: calc(0.3s + min(var(--i, 0), 14) * 45ms);
+}
+
+/* Den som er stemt ut: rister, blir grå og får navnet strøket over. */
+.row.out.fresh { animation: pop 0.45s ease backwards, shake 0.7s ease 0.9s backwards; }
+.row.out.fresh .avatar { animation: gray 0.6s ease 1.3s backwards; }
+.row.out.fresh .name::after,
+.row.out.fresh .num::after { animation: strike 0.5s ease 1.3s backwards; }
+
+.status .avatar.big { animation: bounce-in 0.6s cubic-bezier(0.3, 1.4, 0.5, 1) backwards, float 3.2s ease-in-out 0.7s infinite; }
+.status.alert .avatar.big { animation: bounce-in 0.6s ease backwards, shake 0.7s ease 0.6s backwards; }
+
+.choice { transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease; }
+.choice:active { transform: scale(0.98); }
+.choice.selected { transform: scale(1.02); }
+.choice.selected .radio { animation: check 0.3s ease; }
+
+.progress > div {
+  background: linear-gradient(90deg, var(--orange) 0%, #f6c36f 50%, var(--orange) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2.4s linear infinite;
+}
+
+.toast { animation: toast-in 0.25s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Nettbrett og bred skjerm                                           */
+/* ------------------------------------------------------------------ */
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  -webkit-tap-highlight-color: transparent;
+}
+button, input { touch-action: manipulation; }
+
+.list.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 12px; }
+.list.grid > li { min-width: 0; }
+.list.grid .row { width: 100%; }
+
+@media (min-width: 700px) {
+  .app { max-width: 920px; }
+  .app.wide { max-width: 1180px; }
+
+  .hero { padding: 40px 48px 108px; border-radius: 0 0 48px 48px; }
+  .hero::before { right: 40px; width: 280px; height: 170px; }
+  .hero-eyebrow { font-size: 15px; }
+  .hero h1 { font-size: 44px; }
+  .hero p { font-size: 19px; }
+
+  .sheet { margin: -68px 32px 32px; padding: 36px 40px 40px; border-radius: 40px; }
+  .sheet h2 { font-size: 30px; }
+  .sheet .lead { font-size: 18px; }
+
+  label { font-size: 15px; }
+  input { padding: 18px 26px; font-size: 20px; }
+  .btn { padding: 20px 28px; font-size: 21px; }
+  .link-btn { font-size: 15px; }
+  .hint, .error { font-size: 15px; }
+
+  .row { gap: 16px; min-height: 78px; padding: 14px 22px 14px 16px; border-radius: 28px; }
+  .row .name { font-size: 20px; }
+  .row .name small { font-size: 14px; }
+  .row .num { width: 38px; font-size: 22px; }
+  .avatar { width: 58px; height: 58px; font-size: 34px; }
+  .avatar.big { width: 140px; height: 140px; font-size: 80px; }
+  .pill { padding: 5px 14px; font-size: 15px; }
+  .choice .radio { width: 30px; height: 30px; }
+
+  .status h2 { font-size: 34px; }
+  .status p { font-size: 19px; }
+  .section-title { font-size: 22px; margin-top: 28px; }
+  .progress { height: 14px; }
+
+  #screen-join h2, #screen-join .lead { text-align: center; }
+  #screen-join form { max-width: 520px; margin: 0 auto; }
+  #screen-vote .btn { max-width: 440px; margin-left: auto; margin-right: auto; }
+  .toast { font-size: 17px; padding: 14px 26px; }
+}
+
+/* Vertssiden: koden og knappene til venstre, spillerne til høyre (liggende iPad og større). */
+@media (min-width: 960px) {
+  .host-grid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 40px; align-items: start; }
+  .host-side { position: sticky; top: 20px; }
+  .host-main .section-title { margin-top: 0; }
+  .host-main .list.grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .qr-card .qr { width: min(100%, 340px); }
+  .qr-card .code { font-size: 40px; }
 }

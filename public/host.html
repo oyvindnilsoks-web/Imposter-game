@@ -31,6 +31,8 @@
 
       <!-- Spillet er i gang -->
       <section id="screen-game" hidden>
+        <div class="host-grid">
+          <div class="host-side">
         <div id="qr-block" hidden>
           <div class="qr-card">
             <div class="qr" id="qr-img" role="img" aria-label="QR code to join the game"></div>
@@ -52,8 +54,7 @@
           <div class="progress"><div id="vote-progress-bar"></div></div>
         </div>
 
-        <div class="section-title"><span id="list-title" style="font-size:18px;font-weight:600;color:inherit"></span><span id="list-count"></span></div>
-        <ul class="list" id="players"></ul>
+        
 
         <button class="btn" id="start-btn" hidden>Start game</button>
         <button class="btn" id="vote-btn" hidden></button>
@@ -61,6 +62,12 @@
         <div class="hint" id="action-hint"></div>
         <button class="link-btn" id="end-btn" hidden>End game</button>
         <button class="btn" id="new-btn" hidden>Create new game</button>
+      </div>
+          <div class="host-main">
+        <div class="section-title"><span id="list-title" style="font-size:18px;font-weight:600;color:inherit"></span><span id="list-count"></span></div>
+        <ul class="list grid" id="players"></ul>
+          </div>
+        </div>
       </section>
     </main>
   </div>
