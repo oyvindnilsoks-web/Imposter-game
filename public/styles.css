@@ -1,0 +1,266 @@
+:root {
+  --cream: #f6e8d2;
+  --sand: #f9ddb0;
+  --olive: #5e6e4f;
+  --olive-dark: #475539;
+  --sage: #cfe0be;
+  --brown: #4b2a22;
+  --ink: #3a211b;
+  --muted: #8c7e72;
+  --orange: #e8a13a;
+  --mustard: #f6c36f;
+  --card: #f7f4ee;
+  --line: #efe6d8;
+  --sheet: #ffffff;
+  --danger: #b5553a;
+  --ok: #5e8f4f;
+  --shadow: 0 10px 30px rgba(75, 42, 34, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; min-height: 100%; }
+
+body {
+  font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--sand) 0%, var(--cream) 45%, #f1e3cc 100%);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+[hidden] { display: none !important; }
+
+.app {
+  max-width: 520px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app.wide { max-width: 760px; }
+
+/* Header med fjell og trær, som i referansedesignet */
+.hero {
+  position: relative;
+  padding: 28px 24px 84px;
+  color: #fff;
+  background: var(--olive);
+  border-radius: 0 0 36px 36px;
+  overflow: hidden;
+}
+
+.hero.orange { background: var(--mustard); color: var(--ink); }
+.hero.sage { background: var(--sage); color: var(--ink); }
+
+.hero::before {
+  content: '';
+  position: absolute;
+  right: -30px;
+  top: 8px;
+  width: 190px;
+  height: 120px;
+  background: rgba(255, 255, 255, 0.16);
+  clip-path: polygon(0 100%, 38% 12%, 52% 40%, 70% 0, 100% 100%);
+}
+
+.hero.orange::before, .hero.sage::before { background: rgba(255, 255, 255, 0.4); }
+
+.hero-eyebrow {
+  position: relative;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.85;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hero h1 {
+  position: relative;
+  margin: 4px 0 0;
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: 600;
+}
+
+.hero p {
+  position: relative;
+  margin: 6px 0 0;
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.sheet {
+  position: relative;
+  flex: 1;
+  margin: -56px 14px 24px;
+  padding: 22px 20px 24px;
+  background: var(--sheet);
+  border-radius: 32px;
+  box-shadow: var(--shadow);
+}
+
+.sheet h2 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+.sheet .lead { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+
+/* Skjemaer og knapper */
+label { display: block; margin: 14px 0 6px; font-size: 13px; font-weight: 500; color: var(--muted); }
+
+input {
+  width: 100%;
+  padding: 14px 18px;
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--card);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  outline: none;
+}
+
+input:focus { border-color: var(--orange); background: #fff; }
+input.code { text-align: center; text-transform: uppercase; letter-spacing: 0.4em; font-weight: 600; }
+
+.btn {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  padding: 15px 22px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--brown);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.08s ease, opacity 0.15s ease;
+}
+
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn.secondary { color: var(--brown); background: var(--card); }
+.btn.orange { color: var(--ink); background: var(--orange); }
+
+.link-btn {
+  display: block;
+  margin: 18px auto 0;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.error { min-height: 20px; margin: 10px 4px 0; color: var(--danger); font-size: 13px; text-align: center; }
+
+.hint { margin: 10px 0 0; text-align: center; font-size: 13px; color: var(--muted); }
+
+.warn {
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #7a4a12;
+  background: #fdf0d3;
+  border-radius: 18px;
+}
+
+/* Spillerlister */
+.list { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 0; padding: 0; list-style: none; }
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px 10px 12px;
+  background: var(--card);
+  border: 2px solid transparent;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.row .num { width: 26px; font-size: 18px; font-weight: 600; color: var(--ink); }
+
+.avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  font-size: 24px;
+  background: var(--sand);
+  border-radius: 50%;
+}
+
+.avatar.big { width: 96px; height: 96px; font-size: 54px; }
+
+.row .name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .name small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+
+.row.me { border-color: var(--orange); }
+.row.offline { opacity: 0.55; }
+
+.row.out .name, .row.out .num { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--muted); }
+.row.out .avatar { filter: grayscale(1); opacity: 0.6; }
+
+.pill {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--orange);
+  border-radius: 999px;
+}
+
+.pill.out { background: var(--danger); }
+.pill.soft { color: var(--muted); background: #fff; }
+
+/* Stemmevalg */
+.choice { cursor: pointer; width: 100%; font: inherit; text-align: left; color: inherit; }
+.choice .radio { flex: none; width: 24px; height: 24px; border: 2px solid #d9cdbb; border-radius: 50%; background: #fff; }
+.choice.selected { border-color: var(--orange); background: #fff7e8; }
+.choice.selected .radio { border-color: var(--orange); background: var(--orange); box-shadow: inset 0 0 0 4px #fff; }
+
+/* Resultatsøyler */
+.bar { position: absolute; inset: 0 auto 0 0; background: var(--sand); opacity: 0.7; z-index: 0; transition: width 0.5s ease; }
+.row > *:not(.bar) { position: relative; z-index: 1; }
+
+/* Statuskort */
+.status { margin: 6px 0 0; text-align: center; }
+.status .avatar { margin: 6px auto 12px; }
+.status h2 { font-size: 22px; }
+.status p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+.status.alert .avatar { background: #f6d6cc; }
+
+.progress { height: 10px; margin: 14px 0 0; background: var(--card); border-radius: 999px; overflow: hidden; }
+.progress > div { height: 100%; background: var(--orange); border-radius: 999px; transition: width 0.3s ease; }
+
+/* QR-kort for verten */
+.qr-card { display: flex; flex-direction: column; align-items: center; padding: 18px; background: var(--card); border-radius: 26px; }
+.qr-card img { width: min(300px, 70vw); height: auto; border-radius: 18px; background: #fff; }
+.qr-card .code { margin: 12px 0 0; font-size: 34px; font-weight: 700; letter-spacing: 0.3em; padding-left: 0.3em; }
+.qr-card .url { margin: 2px 0 0; font-size: 12px; color: var(--muted); word-break: break-all; text-align: center; }
+
+.section-title { display: flex; align-items: baseline; justify-content: space-between; margin: 22px 0 0; font-size: 18px; font-weight: 600; }
+.section-title span { font-size: 13px; font-weight: 500; color: var(--muted); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  max-width: calc(100% - 32px);
+  padding: 12px 20px;
+  font-size: 14px;
+  color: #fff;
+  background: var(--brown);
+  border-radius: 999px;
+  transform: translateX(-50%);
+  box-shadow: var(--shadow);
+  z-index: 10;
+}
