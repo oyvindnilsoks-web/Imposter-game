@@ -1,13 +1,13 @@
 (() => {
   const STORE_KEY = 'imposter-player';
-  const socket = io();
+  const api = window.ImposterApi;
   const $ = (id) => document.getElementById(id);
   const SCREENS = ['join', 'wait', 'vote', 'result'];
 
-  let state = null; // felles romtilstand fra serveren
-  let myVote = null; // min egen stemme (kun jeg får vite den)
+  let state = null; // tilstanden fra databasen
   let selected = null;
-  let session = loadSession(); // { code, playerId, name } når jeg er med i et spill
+  let watcher = null;
+  let session = loadSession(); // { code, secret, name } når jeg er med i et spill
 
   function loadSession() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY)) || null; } catch { return null; }
@@ -18,13 +18,6 @@
   function clearSession() {
     session = null;
     try { localStorage.removeItem(STORE_KEY); } catch { /* privat modus */ }
-  }
-
-  // crypto.randomUUID finnes ikke på http://<ip>, så vi bruker getRandomValues.
-  function newPlayerId() {
-    const bytes = new Uint8Array(12);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   }
 
   function esc(text) {
@@ -51,15 +44,26 @@
     $('hero-sub').textContent = sub;
   }
 
+  function showJoin(error = '') {
+    if (watcher) watcher.stop();
+    watcher = null;
+    state = null;
+    selected = null;
+    setHero('', 'Imposter', 'Join the game', 'Enter your name to play.');
+    show('join');
+    $('join-btn').disabled = !api.isReady;
+    $('join-error').textContent = api.isReady ? error : api.NOT_SET_UP;
+  }
+
   function playerRow(player, extra = {}) {
     const classes = ['row'];
-    if (player.id === session?.playerId) classes.push('me');
+    if (player.id === state.meId) classes.push('me');
     if (player.eliminated) classes.push('out');
     if (!player.connected && state.phase === 'lobby') classes.push('offline');
     return `<li class="${classes.join(' ')}">
       ${extra.bar ? `<div class="bar" style="width:${extra.bar}%"></div>` : ''}
       <div class="avatar">${player.avatar}</div>
-      <div class="name">${esc(player.name)}${player.id === session?.playerId ? '<small>You</small>' : ''}</div>
+      <div class="name">${esc(player.name)}${player.id === state.meId ? '<small>You</small>' : ''}</div>
       ${extra.pill || ''}
     </li>`;
   }
@@ -125,10 +129,13 @@
       .join('');
   }
 
+  function pct() {
+    return state.activeCount ? (state.voteCount / state.activeCount) * 100 : 0;
+  }
+
   function render() {
-    if (!session || !state) return show('join');
-    const self = state.players.find((player) => player.id === session.playerId);
-    if (!self) return show('join');
+    const self = state && state.players.find((player) => player.id === state.meId);
+    if (!self) return showJoin();
 
     const phase = state.phase;
     const title = `Round ${state.round}`;
@@ -143,7 +150,7 @@
       if (self.eliminated) {
         setHero('orange', title, 'Vote', 'You are out of the game');
         showWait({ avatar: self.avatar, title: 'You are out', text: 'You can watch while the others vote.', progress: pct() });
-      } else if (myVote) {
+      } else if (state.myVote) {
         setHero('orange', title, 'Vote', 'Your vote is in');
         showWait({
           avatar: '🗳️',
@@ -164,47 +171,34 @@
     }
   }
 
-  function pct() {
-    return state.activeCount ? (state.voteCount / state.activeCount) * 100 : 0;
-  }
-
-  function join(code, name, playerId, { silent = false } = {}) {
-    // Serveren sender romtilstanden før kvitteringen, så økten må være satt på forhånd.
-    session = { code, playerId, name };
-    socket.emit('player:join', { code, name, playerId }, (res) => {
-      if (!res.ok) {
-        // Ved automatisk gjenkobling skal en død økt bare ryddes bort.
+  function follow() {
+    if (watcher) watcher.stop();
+    watcher = api.watchGame(session, {
+      onState(next) {
+        state = next;
+        if (next.phase !== 'voting') selected = null;
+        render();
+      },
+      onGone() {
         clearSession();
-        state = null;
-        setHero('', 'Imposter', 'Join the game', 'Enter your name to play.');
-        show('join');
-        $('join-btn').disabled = false;
-        if (!silent) $('join-error').textContent = res.error;
-        else toast(res.error);
-        return;
-      }
-      session = { code: res.code, playerId, name };
-      saveSession();
-      render();
-      $('join-error').textContent = '';
+        showJoin('That game is no longer there. Ask your teacher for a new code.');
+      },
     });
   }
 
-  socket.on('room:state', (next) => {
-    if (!session || next.code !== session.code) return;
-    state = next;
-    if (state.phase !== 'voting') { myVote = null; selected = null; }
-    render();
-  });
-
-  socket.on('player:me', (me) => {
-    if (session && me.playerId === session.playerId) myVote = me.myVote;
-  });
-
-  // Etter nettverksbrudd får vi ny socket, så vi melder oss inn igjen med samme spiller-id.
-  socket.on('connect', () => {
-    if (session) join(session.code, session.name, session.playerId, { silent: true });
-  });
+  async function join(code, name, secret) {
+    $('join-btn').disabled = true;
+    try {
+      const joined = await api.rpc('imposter_join_game', { p_code: code, p_name: name, p_secret: secret });
+      session = { code: joined.code, secret, name };
+      saveSession();
+      $('join-error').textContent = '';
+      follow();
+    } catch (error) {
+      $('join-error').textContent = error.message;
+      $('join-btn').disabled = false;
+    }
+  }
 
   $('join-form').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -213,8 +207,9 @@
     if (code.length !== 4) return void ($('join-error').textContent = 'The game code has 4 characters.');
     if (!name) return void ($('join-error').textContent = 'Please enter your name.');
     $('join-error').textContent = '';
-    const previous = session && session.code === code ? session.playerId : null;
-    join(code, name, previous || newPlayerId());
+    // Samme enhet og samme spill: bruk den gamle nøkkelen, så du får plassen din tilbake.
+    const secret = session && session.code === code ? session.secret : api.newSecret();
+    join(code, name, secret);
   });
 
   $('vote-list').addEventListener('click', (event) => {
@@ -225,22 +220,26 @@
     $('vote-btn').disabled = false;
   });
 
-  $('vote-btn').addEventListener('click', () => {
+  $('vote-btn').addEventListener('click', async () => {
     if (!selected) return;
     $('vote-btn').disabled = true;
-    socket.emit('player:vote', { targetId: selected }, (res) => {
-      if (!res.ok) {
-        toast(res.error);
-        $('vote-btn').disabled = false;
-      }
-    });
+    try {
+      await api.rpc('imposter_cast_vote', { p_code: session.code, p_secret: session.secret, p_target: selected });
+    } catch (error) {
+      toast(error.message);
+      $('vote-btn').disabled = false;
+    }
+    watcher.refresh();
   });
 
-  const urlCode = new URLSearchParams(location.search).get('code');
-  if (urlCode) $('code').value = urlCode.toUpperCase().slice(0, 4);
-  if (session && urlCode && session.code !== urlCode.toUpperCase()) clearSession();
+  const urlCode = (new URLSearchParams(location.search).get('code') || '').toUpperCase().slice(0, 4);
+  if (session && urlCode && session.code !== urlCode) clearSession();
+
+  if (urlCode) $('code').value = urlCode;
+  else if (session) $('code').value = session.code;
   if (session) $('name').value = session.name;
-  if (!$('code').value && session) $('code').value = session.code;
-  show('join');
-  $('name').focus();
+
+  showJoin();
+  if (session && api.isReady) follow();
+  if (!session) $('name').focus();
 })();

@@ -1,6 +1,6 @@
 # Imposter
 
-Et live impostor-spill for engelskundervisning. Elevene scanner en QR-kode for å bli med, og læreren styrer avstemmingene. Selve spillet (det elevene og du ser på skjermen) er på enkel engelsk.
+Et live impostor-spill for engelskundervisning. Elevene scanner en QR-kode for å bli med, og læreren styrer avstemmingene. Alt elevene og du ser på skjermen er på enkel engelsk.
 
 ## Slik spiller dere
 
@@ -11,32 +11,39 @@ Et live impostor-spill for engelskundervisning. Elevene scanner en QR-kode for �
 5. Avstemmingen lukkes automatisk når alle har stemt. Den med flest stemmer krysses ut. Ved uavgjort blir ingen kastet ut.
 6. Læreren trykker **Start round 2 vote**, og slik fortsetter det. Spillere som er ute kan følge med, men ikke stemme.
 
-Hvis noen har mistet nettet og avstemmingen står fast, kan læreren trykke **Close vote now**.
+Hvis noen har mistet nettet og avstemmingen står fast, trykk **Close vote now**.
 
-## Kjøre spillet
+## Slik er det bygget
 
-Krever Node.js 18 eller nyere.
+- **Nettsiden** (`public/`) er rene statiske filer, uten byggesteg. Den kan ligge på Netlify.
+- **Databasen** er Supabase. All spillogikk ligger som SQL-funksjoner i `supabase/schema.sql`: hvem som får bli med, stemmetelling og utkastelse. Nettleseren kan ikke lese hemmeligheter, andres stemmer eller endre tabeller direkte.
+- **Live-oppdatering** går via Supabase Realtime, og sidene sjekker i tillegg for endringer hvert 3. sekund. Spillet fungerer derfor også om Realtime skulle være av.
+- Spill som er over 1 døgn gammelt ryddes bort automatisk.
+
+Tabeller og funksjoner heter `imposter_…`, så de kan ligge i et Supabase-prosjekt som brukes til andre ting.
+
+## Sette opp
+
+1. **Supabase:** kjør hele `supabase/schema.sql` én gang i SQL Editor. Den kan kjøres på nytt uten skade.
+2. **Koble siden:** legg prosjekt-URL og publiserbar nøkkel i `public/config.js`.
+3. **Netlify:** koble repoet og la innstillingene i `netlify.toml` gjelde (publiser mappen `public`, ingen byggekommando). Åpne `https://<din-side>.netlify.app/host`.
+
+## Prøve lokalt (uten Supabase)
 
 ```bash
 npm install
-npm start
+npm run local
 ```
 
-Serveren starter på port 3000 (endre med `PORT`). Åpne `http://<adresse>:3000/host`.
-
-QR-koden peker på adressen du åpnet verts-siden fra. Derfor må du **ikke** bruke `localhost` hvis elevene skal bli med fra egne mobiler:
-
-- **På samme Wi-Fi:** åpne verts-siden via maskinens IP-adresse, for eksempel `http://192.168.1.20:3000/host`.
-- **På nett:** publiser på en vert som støtter WebSocket og en kjørende Node-prosess (Render, Railway, Fly.io o.l.), og åpne `/host` på den adressen.
-
-Spilltilstanden ligger i minnet på serveren. Starter du serveren på nytt, forsvinner pågående spill.
+Åpner en testversjon på `http://localhost:3000/host`. Den bruker en innebygd Postgres med nøyaktig samme SQL, så du kan teste hele spillet uten konto. Tilstanden forsvinner når du stopper den. Elever på andre enheter kommer ikke inn via `localhost`, så dette er bare for å prøve.
 
 ## Utvikling
 
 ```bash
-npm test
+npm test          # SQL-reglene kjøres mot en lokal Postgres
+npm run vendor    # kopierer nettleserbibliotekene til public/vendor etter oppdatering
 ```
 
-- `server.js` – Express + Socket.IO, QR-generering
-- `lib/room.js` – spillreglene (lobby, avstemming, utkastelse), uten nettverkskode
-- `public/` – verts-siden (`host.html`) og elevsiden (`index.html`)
+- `supabase/schema.sql` – tabeller, sikkerhet og spillregler
+- `public/` – elevside (`index.html`), vertsside (`host.html`), felles kode (`api.js`) og bibliotekene i `vendor/`
+- `scripts/` – lokal testversjon og hjelpeskript

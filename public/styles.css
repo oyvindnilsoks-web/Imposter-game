@@ -243,7 +243,8 @@ input.code { text-align: center; text-transform: uppercase; letter-spacing: 0.4e
 
 /* QR-kort for verten */
 .qr-card { display: flex; flex-direction: column; align-items: center; padding: 18px; background: var(--card); border-radius: 26px; }
-.qr-card img { width: min(300px, 70vw); height: auto; border-radius: 18px; background: #fff; }
+.qr-card .qr { width: min(300px, 70vw); border-radius: 18px; overflow: hidden; background: #fff; }
+.qr-card .qr svg { display: block; width: 100%; height: auto; }
 .qr-card .code { margin: 12px 0 0; font-size: 34px; font-weight: 700; letter-spacing: 0.3em; padding-left: 0.3em; }
 .qr-card .url { margin: 2px 0 0; font-size: 12px; color: var(--muted); word-break: break-all; text-align: center; }
 

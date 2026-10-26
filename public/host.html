@@ -22,10 +22,8 @@
       <section id="screen-create">
         <h2>Ready to play?</h2>
         <p class="lead">You get a QR code. Students scan it to enter the lobby.</p>
-        <div class="warn" id="localhost-warn" hidden>
-          You opened this page with <b>localhost</b>. Student phones cannot reach that address.
-          Open the page with this computer's IP address (for example <b>http://192.168.1.20:3000/host</b>)
-          or with the address of the published game, so the QR code works.
+        <div class="warn" id="setup-warn" hidden>
+          The game is not connected to Supabase yet. Add the project URL and key to <b>public/config.js</b>.
         </div>
         <button class="btn" id="create-btn">Create new game</button>
         <div class="error" id="create-error"></div>
@@ -35,7 +33,7 @@
       <section id="screen-game" hidden>
         <div id="qr-block" hidden>
           <div class="qr-card">
-            <img id="qr-img" alt="QR code to join the game">
+            <div class="qr" id="qr-img" role="img" aria-label="QR code to join the game"></div>
             <div class="code" id="qr-code"></div>
             <div class="url" id="qr-url"></div>
           </div>
@@ -68,7 +66,10 @@
   </div>
   <div class="toast" id="toast" hidden></div>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="/config.js"></script>
+  <script src="/vendor/supabase.js"></script>
+  <script src="/vendor/qrcode.js"></script>
+  <script src="/api.js"></script>
   <script src="/host.js"></script>
 </body>
 </html>

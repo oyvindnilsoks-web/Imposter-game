@@ -1,21 +1,24 @@
 (() => {
   const STORE_KEY = 'imposter-host';
-  const socket = io();
+  const api = window.ImposterApi;
   const $ = (id) => document.getElementById(id);
 
   let state = null;
-  let info = null; // { code, hostToken, joinUrl, qr }
+  let info = null; // { code, secret, joinUrl, qr }
+  let watcher = null;
 
   function loadCreds() {
-    try { return JSON.parse(sessionStorage.getItem(STORE_KEY)) || null; } catch { return null; }
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || null; } catch { return null; }
   }
   function saveCreds() {
-    try { sessionStorage.setItem(STORE_KEY, JSON.stringify({ code: info.code, hostToken: info.hostToken })); } catch { /* ignorer */ }
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ code: info.code, secret: info.secret })); } catch { /* ignorer */ }
   }
   function clearCreds() {
+    if (watcher) watcher.stop();
+    watcher = null;
     info = null;
     state = null;
-    try { sessionStorage.removeItem(STORE_KEY); } catch { /* ignorer */ }
+    try { localStorage.removeItem(STORE_KEY); } catch { /* ignorer */ }
   }
 
   function esc(text) {
@@ -38,18 +41,29 @@
     $('hero-sub').textContent = sub;
   }
 
-  function showCreate() {
+  function showCreate(error = '') {
     $('screen-create').hidden = false;
     $('screen-game').hidden = true;
     setHero('', 'Imposter', 'Create a game', 'Students scan a QR code to join.');
-    const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-    $('localhost-warn').hidden = !local;
+    $('setup-warn').hidden = api.isReady;
+    $('create-btn').disabled = !api.isReady;
+    $('create-error').textContent = error;
   }
 
-  function act(event) {
-    socket.emit(event, {}, (res) => {
-      if (!res.ok) toast(res.error);
-    });
+  function makeQr(url) {
+    const qr = window.qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    return qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true }).replace('fill="black"', 'fill="#3A211B"');
+  }
+
+  async function act(fn) {
+    try {
+      await api.rpc(fn, { p_code: info.code, p_host_secret: info.secret });
+    } catch (error) {
+      toast(error.message);
+    }
+    if (watcher) watcher.refresh();
   }
 
   function playerRow(player, index, result) {
@@ -95,7 +109,7 @@
 
     // QR vises i lobbyen
     $('qr-block').hidden = phase !== 'lobby';
-    $('qr-img').src = info.qr;
+    $('qr-img').innerHTML = info.qr;
     $('qr-code').textContent = info.code;
     $('qr-url').textContent = info.joinUrl;
 
@@ -142,53 +156,45 @@
     $('action-hint').textContent = hint;
   }
 
-  function adopt(res) {
-    info = res;
-    saveCreds();
-    render();
-  }
-
-  function resume(creds) {
-    socket.emit('host:resume', { ...creds, baseUrl: location.origin }, (res) => {
-      if (!res.ok) {
+  function follow() {
+    if (watcher) watcher.stop();
+    watcher = api.watchGame({ code: info.code, secret: null }, {
+      onState(next) {
+        state = next;
+        render();
+      },
+      onGone() {
         clearCreds();
-        showCreate();
-        return;
-      }
-      adopt(res);
+        showCreate('That game is gone. You can create a new one.');
+      },
     });
   }
 
-  socket.on('room:state', (next) => {
-    if (info && next.code !== info.code) return;
-    state = next;
-    render();
-  });
+  function adopt(code, secret) {
+    const joinUrl = `${location.origin}/?code=${code}`;
+    info = { code, secret, joinUrl, qr: makeQr(joinUrl) };
+    saveCreds();
+    follow();
+  }
 
-  socket.on('connect', () => {
-    const creds = info ? { code: info.code, hostToken: info.hostToken } : loadCreds();
-    if (creds) resume(creds);
-    else showCreate();
-  });
-
-  $('create-btn').addEventListener('click', () => {
+  $('create-btn').addEventListener('click', async () => {
     $('create-btn').disabled = true;
-    socket.emit('host:create', { baseUrl: location.origin }, (res) => {
-      $('create-btn').disabled = false;
-      if (!res.ok) {
-        $('create-error').textContent = res.error;
-        return;
-      }
+    try {
+      const secret = api.newSecret();
+      const code = await api.rpc('imposter_create_game', { p_host_secret: secret });
       $('create-error').textContent = '';
-      adopt(res);
-    });
+      adopt(code, secret);
+    } catch (error) {
+      $('create-error').textContent = error.message;
+    }
+    $('create-btn').disabled = !api.isReady;
   });
 
-  $('start-btn').addEventListener('click', () => act('host:start'));
-  $('vote-btn').addEventListener('click', () => act('host:startVote'));
-  $('close-btn').addEventListener('click', () => act('host:closeVote'));
+  $('start-btn').addEventListener('click', () => act('imposter_start_game'));
+  $('vote-btn').addEventListener('click', () => act('imposter_start_vote'));
+  $('close-btn').addEventListener('click', () => act('imposter_close_vote'));
   $('end-btn').addEventListener('click', () => {
-    if (confirm('End the game for everyone?')) act('host:end');
+    if (confirm('End the game for everyone?')) act('imposter_end_game');
   });
   $('new-btn').addEventListener('click', () => {
     clearCreds();
@@ -196,4 +202,6 @@
   });
 
   showCreate();
+  const saved = loadCreds();
+  if (saved && api.isReady) adopt(saved.code, saved.secret);
 })();
