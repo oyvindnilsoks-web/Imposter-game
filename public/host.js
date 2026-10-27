@@ -9,6 +9,7 @@
   let watcher = null;
   let lastKey = '';
   let picker = { open: false, shown: false, draft: new Set() }; // impostor-dialogen, skjult til læreren trykker Show
+  let killer = { open: false, target: null }; // dialogen for hvem som ble drept
   const seen = new Set();
   let pendingSeen = [];
 
@@ -26,6 +27,7 @@
     photos = {};
     lastKey = '';
     closePicker();
+    closeKiller();
     try { localStorage.removeItem(STORE_KEY); } catch { /* ignorer */ }
   }
 
@@ -129,7 +131,8 @@
     const impostorIds = state.impostorIds || [];
     const crewWon = state.winner === 'crew';
     // I rekkefølgen spillerne ble med, så teksten alltid er lik for alle.
-    const tied = result && result.runoffIds ? state.players.filter((player) => result.runoffIds.includes(player.id)) : [];
+    let tied = result && result.runoffIds ? state.players.filter((player) => result.runoffIds.includes(player.id) && !player.eliminated) : [];
+    if (tied.length < 2) tied = []; // en drept spiller kan ha tatt plassen i omavstemmingen
 
     // Impostorene vises aldri på hovedskjermen før spillet er slutt. De velges i en egen, skjult dialog.
     const showImpostors = phase === 'over';
@@ -145,6 +148,15 @@
     else if (phase === 'result') setHero(result.eliminatedId ? 'sage' : 'orange', `Game ${state.code}`, `Round ${round}`, 'Result');
     else if (phase === 'over') setHero(crewWon ? 'sage' : 'orange', `Game ${state.code}`, crewWon ? 'Crew wins!' : 'Impostors win!', 'The game is over.');
     else setHero('', `Game ${state.code}`, 'The game has ended', 'Thanks for playing!');
+
+    // Hvem som er drept før denne avstemmingen
+    const killed = state.players.filter((player) => (state.killedIds || []).includes(player.id));
+    $('kill-note').hidden = killed.length === 0 || !['ready', 'voting', 'result'].includes(phase);
+    if (killed.length) {
+      const names = killed.map((player) => player.name);
+      const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.`;
+    }
 
     // QR vises i lobbyen
     $('qr-block').hidden = phase !== 'lobby';
@@ -200,6 +212,7 @@
     $('imp-btn').hidden = phase !== 'ready';
     $('imp-btn').textContent = validPick ? 'Change impostors' : 'Pick impostors';
     $('imp-btn').classList.toggle('secondary', validPick);
+    $('kill-btn').hidden = !((phase === 'ready' && validPick) || phase === 'result');
     $('end-btn').hidden = finished;
     $('new-btn').hidden = !finished;
 
@@ -331,6 +344,51 @@
     } catch (error) {
       toast(error.message);
       renderPicker();
+    }
+    if (watcher) watcher.refresh();
+  });
+
+  // Dialog for å markere hvem som ble drept før avstemmingen. Navnet er ikke hemmelig, siden alle får se det.
+  function renderKiller() {
+    $('kill-modal').hidden = !killer.open;
+    if (!killer.open || !state) return;
+    $('kill-list').innerHTML = state.players
+      .filter((player) => !player.eliminated)
+      .map((player, index) => `<li><button type="button" class="row pick${killer.target === player.id ? ' imp' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
+        <div class="avatar">${avatarHtml(player)}</div>
+        <div class="name"><span class="t">${esc(player.name)}</span></div>
+        ${killer.target === player.id ? '<span class="pill imp">💀 Killed</span>' : ''}</button></li>`)
+      .join('');
+    $('kill-confirm').disabled = !killer.target;
+  }
+
+  function openKiller() {
+    killer = { open: true, target: null };
+    renderKiller();
+  }
+
+  function closeKiller() {
+    killer = { open: false, target: null };
+    $('kill-modal').hidden = true;
+  }
+
+  $('kill-btn').addEventListener('click', openKiller);
+  $('kill-cancel').addEventListener('click', closeKiller);
+  $('kill-list').addEventListener('click', (event) => {
+    const button = event.target.closest('.pick');
+    if (!button) return;
+    killer.target = button.dataset.id;
+    renderKiller();
+  });
+  $('kill-confirm').addEventListener('click', async () => {
+    if (!killer.target) return;
+    $('kill-confirm').disabled = true;
+    try {
+      await api.rpc('imposter_kill_player', { p_code: info.code, p_host_secret: info.secret, p_player: killer.target });
+      closeKiller();
+    } catch (error) {
+      toast(error.message);
+      renderKiller();
     }
     if (watcher) watcher.refresh();
   });

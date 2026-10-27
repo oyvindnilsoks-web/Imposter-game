@@ -56,6 +56,7 @@ alter table imposter_games add column if not exists winner text;
 alter table imposter_games add column if not exists runoff_ids uuid[];
 alter table imposter_games add column if not exists candidate_ids uuid[];
 alter table imposter_games add column if not exists in_runoff boolean not null default false;
+alter table imposter_games add column if not exists killed_ids uuid[];
 
 -- Keeps the player list in the order people joined, even when two join in the same moment.
 alter table imposter_players alter column joined_at set default clock_timestamp();
@@ -214,6 +215,7 @@ begin
      set phase = v_phase,
          winner = v_winner,
          runoff_ids = v_runoff,
+         killed_ids = null,
          result = jsonb_build_object(
            'round', v_game.round,
            'counts', v_counts,
@@ -410,6 +412,64 @@ begin
 end;
 $$;
 
+-- Host: mark a player as killed. Used between rounds, before the next vote, for the one the
+-- impostors got rid of. It counts like a player being out, and it can end the game.
+create or replace function imposter_kill_player(p_code text, p_host_secret text, p_player uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+  v_target imposter_players;
+  v_crew integer;
+  v_impostors integer;
+  v_phase text := v_game.phase;
+  v_winner text;
+  v_runoff uuid[];
+begin
+  if v_game.phase not in ('ready', 'result') then
+    raise exception 'You can only mark a kill before a vote.';
+  end if;
+  if not exists (select 1 from imposter_players where game_code = v_game.code and is_impostor) then
+    raise exception 'Pick the impostors first.';
+  end if;
+
+  select * into v_target from imposter_players where id = p_player and game_code = v_game.code;
+  if not found or v_target.eliminated then
+    raise exception 'Invalid choice.';
+  end if;
+
+  update imposter_players set eliminated = true where id = v_target.id;
+
+  select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
+    into v_crew, v_impostors
+    from imposter_players where game_code = v_game.code and not eliminated;
+  if v_impostors = 0 then
+    v_phase := 'over';
+    v_winner := 'crew';
+  elsif v_impostors >= v_crew then
+    v_phase := 'over';
+    v_winner := 'impostors';
+  end if;
+
+  -- A waiting runoff loses a candidate. With fewer than two left, the next vote is a normal one.
+  v_runoff := array_remove(v_game.runoff_ids, v_target.id);
+  if coalesce(array_length(v_runoff, 1), 0) < 2 then
+    v_runoff := null;
+  end if;
+
+  update imposter_games
+     set phase = v_phase,
+         winner = v_winner,
+         runoff_ids = v_runoff,
+         killed_ids = coalesce(killed_ids, '{}') || v_target.id,
+         updated_at = now()
+   where code = v_game.code;
+end;
+$$;
+
 -- Player: vote for someone. The vote closes by itself when everyone still in the game has voted.
 create or replace function imposter_cast_vote(p_code text, p_secret text, p_target uuid)
 returns void
@@ -587,6 +647,7 @@ begin
     'winner', v_game.winner,
     'inRunoff', v_game.in_runoff,
     'candidateIds', to_jsonb(v_game.candidate_ids),
+    'killedIds', to_jsonb(v_game.killed_ids),
     'impostorIds', v_impostors,
     'meId', v_me,
     'myVote', v_my_vote
@@ -610,6 +671,7 @@ revoke all on function imposter_cast_vote(text, text, uuid) from public;
 revoke all on function imposter_close_vote(text, text) from public;
 revoke all on function imposter_end_game(text, text) from public;
 revoke all on function imposter_set_impostors(text, text, uuid[]) from public;
+revoke all on function imposter_kill_player(text, text, uuid) from public;
 revoke all on function imposter_get_state(text, text, text) from public;
 
 grant execute on function imposter_create_game(text) to anon, authenticated;
@@ -620,4 +682,5 @@ grant execute on function imposter_cast_vote(text, text, uuid) to anon, authenti
 grant execute on function imposter_close_vote(text, text) to anon, authenticated;
 grant execute on function imposter_end_game(text, text) to anon, authenticated;
 grant execute on function imposter_set_impostors(text, text, uuid[]) to anon, authenticated;
+grant execute on function imposter_kill_player(text, text, uuid) to anon, authenticated;
 grant execute on function imposter_get_state(text, text, text) to anon, authenticated;

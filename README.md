@@ -7,7 +7,7 @@ Et live impostor-spill for engelskundervisning. Elevene scanner en QR-kode for �
 1. **Læreren** åpner `/host` og trykker **Create new game**. En QR-kode og en spillkode vises.
 2. **Elevene** scanner QR-koden, kan ta et bilde av seg selv, skriver inn navnet sitt og havner i lobbyen. Læreren ser alle som er med.
 3. Læreren trykker **Start game**, og så **Pick impostors**. Der trykker du **Show**, velger impostorene og trykker **Save**. Spillet krever minst én impostor, og flere crew enn impostorer.
-4. Læreren trykker **Start round 1 vote**. Alle som er med får opp en liste og stemmer på den de tror er impostor. Hver har én stemme, og man kan ikke stemme på seg selv.
+4. Hvis noen er drept av impostorene før avstemmingen, trykker læreren **Someone was killed** (før runde 1 og mellom rundene) og velger den som er drept. Alle ser hvem det var, og spillet teller det som en utkastelse, så det kan også avgjøre spillet. Så trykker læreren **Start round 1 vote**. Alle som er med får opp en liste og stemmer på den de tror er impostor. Hver har én stemme, og man kan ikke stemme på seg selv.
 5. Avstemmingen lukkes automatisk når alle har stemt. Den med flest stemmer krysses ut.
 6. **Uavgjort:** ingen blir kastet ut. Neste runde er en omavstemming (**Start runoff vote**) der bare de som sto likt kan velges. Blir også den uavgjort, er neste runde en vanlig avstemming med alle.
 7. Læreren trykker **Start round 2 vote**, og slik fortsetter det. Spillere som er ute kan følge med, men ikke stemme.

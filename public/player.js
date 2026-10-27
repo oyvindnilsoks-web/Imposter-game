@@ -199,18 +199,33 @@
 
     const phase = state.phase;
     const title = `Round ${state.round}`;
+    const killedSelf = self.eliminated && (state.killedIds || []).includes(self.id);
+
+    // Hvem som er drept før denne avstemmingen
+    const killed = state.players.filter((player) => (state.killedIds || []).includes(player.id));
+    $('kill-note').hidden = killed.length === 0 || !['ready', 'voting', 'result'].includes(phase);
+    if (killed.length) {
+      const names = killed.map((player) => player.name);
+      const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.`;
+    }
 
     if (phase === 'lobby') {
       setHero('', `Game ${state.code}`, "You're in!", `Hi, ${self.name}`);
       showWait({ avatar: avatarHtml(self), title: 'Waiting to start', text: 'Your teacher will start the game soon.', list: 'lobby', photoButton: true });
     } else if (phase === 'ready') {
       setHero('', `Game ${state.code}`, 'The game is on', `Hi, ${self.name}`);
-      showWait({ avatar: avatarHtml(self), title: 'The game has started', text: 'Your teacher will open the vote.', photoButton: true });
+      showWait({
+        avatar: avatarHtml(self),
+        title: killedSelf ? 'You were killed' : self.eliminated ? 'You are out' : 'The game has started',
+        text: self.eliminated ? 'You can watch while the others play.' : 'Your teacher will open the vote.',
+        photoButton: true,
+      });
     } else if (phase === 'voting') {
       const heroTitle = state.inRunoff ? 'Runoff vote' : 'Vote';
       if (self.eliminated) {
         setHero('orange', title, heroTitle, 'You are out of the game');
-        showWait({ avatar: avatarHtml(self), title: 'You are out', text: 'You can watch while the others vote.', progress: pct(), photoButton: true });
+        showWait({ avatar: avatarHtml(self), title: killedSelf ? 'You were killed' : 'You are out', text: 'You can watch while the others vote.', progress: pct(), photoButton: true });
       } else if (state.myVote) {
         setHero('orange', title, heroTitle, 'Your vote is in');
         showWait({

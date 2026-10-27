@@ -34,6 +34,7 @@
       <section id="screen-game" hidden>
         <div class="host-grid">
           <div class="host-side">
+        <div class="notice" id="kill-note" hidden></div>
         <div id="qr-block" hidden>
           <div class="qr-card">
             <div class="qr" id="qr-img" role="img" aria-label="QR code to join the game"></div>
@@ -59,6 +60,7 @@
 
         <button class="btn" id="start-btn" hidden>Start game</button>
         <button class="btn orange" id="imp-btn" hidden>Pick impostors</button>
+        <button class="btn secondary" id="kill-btn" hidden>💀 Someone was killed</button>
         <button class="btn" id="vote-btn" hidden></button>
         <button class="btn secondary" id="close-btn" hidden>Close vote now</button>
         <div class="hint" id="action-hint"></div>
@@ -87,6 +89,18 @@
         <button type="button" class="btn secondary" id="imp-cancel">Cancel</button>
         <button type="button" class="btn secondary" id="imp-hide" hidden>Hide</button>
         <button type="button" class="btn" id="imp-save" disabled>Save</button>
+      </div>
+    </div>
+  </div>
+  <!-- Marker hvem som ble drept før avstemmingen. Alle får vite det, så dialogen er ikke sløret. -->
+  <div class="modal" id="kill-modal" role="dialog" aria-modal="true" aria-labelledby="kill-title" hidden>
+    <div class="modal-card">
+      <h2 id="kill-title">Who was killed?</h2>
+      <p class="lead">The player is out of the game, and everyone sees it. Then start the vote.</p>
+      <ul class="list grid" id="kill-list"></ul>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="kill-cancel">Cancel</button>
+        <button type="button" class="btn" id="kill-confirm" disabled>Confirm</button>
       </div>
     </div>
   </div>
