@@ -155,7 +155,8 @@
     const { result } = state;
     const byId = new Map(state.players.map((player) => [player.id, player]));
     const out = result.eliminatedId ? byId.get(result.eliminatedId) : null;
-    const tied = (result.runoffIds || []).map((id) => byId.get(id)).filter(Boolean);
+    // I rekkefølgen spillerne ble med, så teksten alltid er lik for alle.
+    const tied = state.players.filter((player) => (result.runoffIds || []).includes(player.id));
 
     $('result-status').className = `status${out && out.id === self.id ? ' alert' : ''}`;
     if (out) {

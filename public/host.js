@@ -128,7 +128,8 @@
     const byId = new Map(state.players.map((player) => [player.id, player]));
     const impostorIds = state.impostorIds || [];
     const crewWon = state.winner === 'crew';
-    const tied = result && result.runoffIds ? result.runoffIds.map((id) => byId.get(id)).filter(Boolean) : [];
+    // I rekkefølgen spillerne ble med, så teksten alltid er lik for alle.
+    const tied = result && result.runoffIds ? state.players.filter((player) => result.runoffIds.includes(player.id)) : [];
 
     // Impostorene vises aldri på hovedskjermen før spillet er slutt. De velges i en egen, skjult dialog.
     const showImpostors = phase === 'over';
