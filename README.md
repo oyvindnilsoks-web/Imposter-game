@@ -18,7 +18,7 @@ Hvis noen har mistet nettet og avstemmingen står fast, trykk **Close vote now**
 Dialogen for å velge impostorer er sløret helt til du trykker **Show** (trykk **Hide** for å skjule igjen), og valget sendes først når du trykker **Save**. Impostorene vises ikke noe sted på hovedskjermen før spillet er slutt, så du kan trygt vise den på tavla.
 
 ### Bilder
-Elevene kan ta et lite bilde av seg selv (128×128 piksler) i stedet for dyre-emojien. Bildet:
+Elevene kan ta et lite bilde av seg selv (128×128 piksler) i stedet for dyre-emojien, enten når de blir med eller senere mens de venter (**Add a photo** / **Change photo**). Bildet:
 - lagres bare i nettleseren mens fanen er åpen (`sessionStorage`), og skrives **aldri** til databasen,
 - deles med de andre spillerne via Supabase Realtime Presence, som bare holder det i minnet mens eleven er koblet til,
 - forsvinner når eleven lukker siden. Uten Realtime vises emoji som vanlig.

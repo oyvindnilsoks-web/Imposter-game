@@ -28,8 +28,7 @@
           <input id="code" class="code" maxlength="4" placeholder="ABCD" autocapitalize="characters" spellcheck="false">
           <div class="photo-pick">
             <button type="button" class="photo-btn" id="photo-btn" aria-label="Take a photo of yourself"><span id="photo-preview">📷</span></button>
-            <div class="photo-text"><strong>Your photo</strong><span>Optional. Others see it while you play. It is never saved.</span></div>
-            <input id="photo-input" type="file" accept="image/*" capture="user" hidden>
+            <div class="photo-text"><strong>Your photo</strong><span>Optional. Others see it while you play. It is never saved. You can add it later too.</span></div>
           </div>
           <label for="name">Your name</label>
           <input id="name" maxlength="20" placeholder="For example, Emma" autocomplete="given-name">
@@ -45,6 +44,7 @@
           <h2 id="wait-title"></h2>
           <p id="wait-text"></p>
         </div>
+        <div class="photo-add"><button type="button" class="btn secondary compact" id="wait-photo-btn" hidden>📷 Add a photo</button></div>
         <div class="progress" id="wait-progress" hidden><div id="wait-progress-bar"></div></div>
         <div id="wait-list-wrap" hidden>
           <div class="section-title">Players <span id="wait-count"></span></div>
@@ -72,6 +72,8 @@
       </section>
     </main>
   </div>
+  <!-- Delt av join-skjermen og ventesiden, så den finnes uansett hvilken skjerm som vises. -->
+  <input id="photo-input" type="file" accept="image/*" capture="user" hidden>
   <div class="toast" id="toast" hidden></div>
 
   <script src="/config.js"></script>

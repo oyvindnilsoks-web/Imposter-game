@@ -107,11 +107,14 @@
   }
 
   // avatar er ferdig HTML: enten et bilde/emoji fra avatarHtml, eller en fast emoji.
-  function showWait({ avatar, title, text, progress, list, count }) {
+  function showWait({ avatar, title, text, progress, list, count, photoButton }) {
     show('wait');
     $('wait-avatar').innerHTML = avatar;
     $('wait-title').textContent = title;
     $('wait-text').textContent = text;
+    // Eleven kan legge til eller bytte bilde mens hen venter (der avataren er hens egen).
+    $('wait-photo-btn').hidden = !photoButton;
+    $('wait-photo-btn').textContent = myPhoto ? '📷 Change photo' : '📷 Add a photo';
 
     $('wait-progress').hidden = progress == null;
     if (progress != null) $('wait-progress-bar').style.width = `${progress}%`;
@@ -198,15 +201,15 @@
 
     if (phase === 'lobby') {
       setHero('', `Game ${state.code}`, "You're in!", `Hi, ${self.name}`);
-      showWait({ avatar: avatarHtml(self), title: 'Waiting to start', text: 'Your teacher will start the game soon.', list: 'lobby' });
+      showWait({ avatar: avatarHtml(self), title: 'Waiting to start', text: 'Your teacher will start the game soon.', list: 'lobby', photoButton: true });
     } else if (phase === 'ready') {
       setHero('', `Game ${state.code}`, 'The game is on', `Hi, ${self.name}`);
-      showWait({ avatar: avatarHtml(self), title: 'The game has started', text: 'Your teacher will open the vote.' });
+      showWait({ avatar: avatarHtml(self), title: 'The game has started', text: 'Your teacher will open the vote.', photoButton: true });
     } else if (phase === 'voting') {
       const heroTitle = state.inRunoff ? 'Runoff vote' : 'Vote';
       if (self.eliminated) {
         setHero('orange', title, heroTitle, 'You are out of the game');
-        showWait({ avatar: avatarHtml(self), title: 'You are out', text: 'You can watch while the others vote.', progress: pct() });
+        showWait({ avatar: avatarHtml(self), title: 'You are out', text: 'You can watch while the others vote.', progress: pct(), photoButton: true });
       } else if (state.myVote) {
         setHero('orange', title, heroTitle, 'Your vote is in');
         showWait({
@@ -331,6 +334,7 @@
   }
 
   $('photo-btn').addEventListener('click', () => $('photo-input').click());
+  $('wait-photo-btn').addEventListener('click', () => $('photo-input').click());
   $('photo-input').addEventListener('change', async (event) => {
     const file = event.target.files && event.target.files[0];
     event.target.value = '';
@@ -340,6 +344,12 @@
       savePhoto(myPhoto);
       showPhotoPreview();
       if (watcher) watcher.setPhoto(myPhoto);
+      // Bytt avataren med en gang, uten å vente på at Realtime sender bildet tilbake.
+      if (session && session.playerId) {
+        photos = { ...photos, [session.playerId]: myPhoto };
+        lastKey = '';
+        view();
+      }
     } catch (error) {
       toast(error.message);
     }

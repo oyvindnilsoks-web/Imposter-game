@@ -493,3 +493,10 @@ button, input { touch-action: manipulation; }
 .imp-reveal:active { transform: translate(-50%, -50%) scale(0.98); }
 
 .toast { z-index: 30; }
+
+/* Legg til eller bytt bilde mens eleven venter */
+.photo-add { display: flex; justify-content: center; }
+.btn.compact { width: auto; display: inline-block; margin-top: 14px; padding: 12px 24px; font-size: 16px; }
+@media (min-width: 700px) {
+  .btn.compact { padding: 16px 34px; font-size: 19px; }
+}
