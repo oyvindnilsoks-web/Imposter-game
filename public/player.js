@@ -277,6 +277,13 @@
         state = next;
         view();
       },
+      onVotes(count) {
+        if (!state) return;
+        state = { ...state, voteCount: count };
+        // Mens eleven velger, tegner vi ikke listen på nytt (et trykk kan gå tapt).
+        if (!$('screen-vote').hidden) return;
+        view();
+      },
       onPhotos(next) {
         photos = next;
         view();
@@ -394,9 +401,18 @@
   $('vote-btn').addEventListener('click', async () => {
     if (!selected) return;
     $('vote-btn').disabled = true;
+    // Vis «Vote sent» med en gang, uten å vente på nettet. Går noe galt, ruller vi tilbake.
+    const target = selected;
+    const before = state;
+    state = { ...state, myVote: target, voteCount: state.voteCount + 1 };
+    lastKey = '';
+    view();
     try {
-      await api.rpc('imposter_cast_vote', { p_code: session.code, p_secret: session.secret, p_target: selected });
+      await api.rpc('imposter_cast_vote', { p_code: session.code, p_secret: session.secret, p_target: target });
     } catch (error) {
+      state = before;
+      lastKey = '';
+      view();
       toast(error.message);
       $('vote-btn').disabled = false;
     }

@@ -57,6 +57,8 @@ alter table imposter_games add column if not exists runoff_ids uuid[];
 alter table imposter_games add column if not exists candidate_ids uuid[];
 alter table imposter_games add column if not exists in_runoff boolean not null default false;
 alter table imposter_games add column if not exists killed_ids uuid[];
+-- Number of votes so far. It travels with the live update, so screens can show progress without asking again.
+alter table imposter_games add column if not exists vote_count integer not null default 0;
 
 -- Keeps the player list in the order people joined, even when two join in the same moment.
 alter table imposter_players alter column joined_at set default clock_timestamp();
@@ -216,6 +218,7 @@ begin
          winner = v_winner,
          runoff_ids = v_runoff,
          killed_ids = null,
+         vote_count = v_cast,
          result = jsonb_build_object(
            'round', v_game.round,
            'counts', v_counts,
@@ -406,6 +409,7 @@ begin
          result = null,
          candidate_ids = v_game.runoff_ids,
          in_runoff = v_game.runoff_ids is not null,
+         vote_count = 0,
          runoff_ids = null,
          updated_at = now()
    where code = v_game.code;
@@ -528,7 +532,7 @@ begin
   if v_votes >= v_active then
     perform imposter_close_vote_internal(v_game.code);
   else
-    update imposter_games set updated_at = now() where code = v_game.code;
+    update imposter_games set vote_count = v_votes, updated_at = now() where code = v_game.code;
   end if;
 end;
 $$;
@@ -595,9 +599,9 @@ begin
   end if;
 
   if p_secret is not null then
-    update imposter_players set last_seen = now()
-     where game_code = v_game.code and secret = p_secret
-    returning id into v_me;
+    select id into v_me from imposter_players where game_code = v_game.code and secret = p_secret;
+    -- Only write now and then, so many quick refreshes do not turn into many writes.
+    update imposter_players set last_seen = now() where id = v_me and last_seen < now() - interval '5 seconds';
   end if;
 
   if p_host_secret is not null then

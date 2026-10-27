@@ -38,7 +38,13 @@ Tabeller og funksjoner heter `imposter_…`, så de kan ligge i et Supabase-pros
 
 1. **Supabase:** kjør hele `supabase/schema.sql` i SQL Editor. Den kan kjøres på nytt uten skade, også oppå en eldre versjon, og beholder data.
 2. **Koble siden:** legg prosjekt-URL og publiserbar nøkkel i `public/config.js`.
-3. **Netlify:** koble repoet og la innstillingene i `netlify.toml` gjelde (publiser mappen `public`, ingen byggekommando). Åpne `https://<din-side>.netlify.app/host`.
+3. **Netlify (autodeploy):** koble repoet én gang, så deployes hver merge til `main` av seg selv.
+   Netlify → prosjektet → **Project configuration → Build & deploy → Continuous deployment → Link repository** → GitHub →
+   `oyvindnilsoks-web/Imposter-game`, production branch `main`, **build command tom**, **publish directory `public`**
+   (`netlify.toml` har dette allerede). Slå gjerne på **Deploy Previews**, så hver pull request får en egen testadresse
+   (den bruker samme Supabase, så bruk den bare til å se på utseende). Åpne `https://<din-side>.netlify.app/host`.
+
+Endringer i `supabase/schema.sql` deployes ikke av Netlify. Lim dem inn i SQL Editor (se punkt 1) **før** du merger kode som trenger dem.
 
 ## Prøve lokalt (uten Supabase)
 

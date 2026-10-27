@@ -45,7 +45,7 @@ window.ImposterApi = (() => {
   //
   // Bilder deles med Realtime Presence: de ligger bare i minnet hos Supabase mens spilleren er
   // koblet til, og skrives aldri til databasen. Uten Realtime vises emoji-avatarene som vanlig.
-  function watchGame({ code, secret, hostSecret, presenceKey, photo }, { onState, onGone, onPhotos }) {
+  function watchGame({ code, secret, hostSecret, presenceKey, photo }, { onState, onGone, onPhotos, onVotes }) {
     let stopped = false;
     let busy = false;
     let again = false;
@@ -77,6 +77,22 @@ window.ImposterApi = (() => {
       }
     }
 
+    // En stemme endrer bare antallet stemmer på spillraden. Da holder det å sende tallet videre
+    // i stedet for at alle skjermer henter hele tilstanden på nytt. Alt annet henter vi som før.
+    let lastSignature = null;
+    let lastVotes = null;
+    function onChange(payload) {
+      const row = payload && payload.new;
+      if (!row) return refresh();
+      const { vote_count: votes, updated_at: ignored, ...rest } = row;
+      const signature = JSON.stringify(rest);
+      const onlyVotes = Boolean(onVotes) && typeof votes === 'number' && lastSignature === signature && votes !== lastVotes;
+      lastSignature = signature;
+      lastVotes = typeof votes === 'number' ? votes : null;
+      if (onlyVotes) onVotes(votes);
+      else refresh();
+    }
+
     let channel = null;
     function track() {
       if (channel && subscribed && myPhoto) channel.track({ photo: myPhoto }).catch(() => {});
@@ -85,7 +101,7 @@ window.ImposterApi = (() => {
     if (client) {
       channel = client
         .channel(`imposter-${code}`, { config: { presence: { key: presenceKey || `viewer-${newSecret().slice(0, 12)}` } } })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'imposter_games', filter: `code=eq.${code}` }, refresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'imposter_games', filter: `code=eq.${code}` }, onChange)
         .on('presence', { event: 'sync' }, () => {
           if (!onPhotos) return;
           const photos = {};

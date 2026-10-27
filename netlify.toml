@@ -1,5 +1,9 @@
+# Nettsiden er rene statiske filer i mappen public, uten byggesteg.
 [build]
   publish = "public"
+
+[build.environment]
+  NODE_VERSION = "22"
 
 [[redirects]]
   from = "/host"

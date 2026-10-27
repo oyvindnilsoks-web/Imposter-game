@@ -247,6 +247,11 @@
         state = next;
         view();
       },
+      onVotes(count) {
+        if (!state) return;
+        state = { ...state, voteCount: count };
+        view();
+      },
       onPhotos(next) {
         photos = next;
         view();

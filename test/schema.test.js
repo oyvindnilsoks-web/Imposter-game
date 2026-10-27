@@ -405,3 +405,28 @@ test('a kill between rounds removes the player from a waiting runoff', async () 
   assert.equal(next.candidateIds, null);
   assert.equal(next.activeCount, 5);
 });
+
+test('the vote count travels on the game row, and starts over each round', async () => {
+  const game = await startVoting(4);
+  const count = async () => (await db.query('select vote_count from imposter_games where code = $1', [game.code])).rows[0].vote_count;
+  assert.equal(await count(), 0);
+
+  await vote(game, 0, 1);
+  assert.equal(await count(), 1);
+  await vote(game, 2, 1);
+  assert.equal(await count(), 2);
+  await castAll(game, [[3, 1], [1, 0]]);
+  assert.equal((await state(game)).phase, 'result');
+  assert.equal(await count(), 4);
+
+  await host(game, 'imposter_start_vote');
+  assert.equal(await count(), 0);
+});
+
+test('players stay marked as online when they refresh often', async () => {
+  const game = await newGame(3);
+  for (let i = 0; i < 3; i++) await state(game, 0);
+  const after = await state(game, 0);
+  assert.equal(after.meId, game.players[0].id);
+  assert.equal(after.players[0].connected, true);
+});
