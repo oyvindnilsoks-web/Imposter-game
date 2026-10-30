@@ -9,6 +9,10 @@
   let info = null; // { code, secret, joinUrl, qr }
   let watcher = null;
   let lastKey = '';
+  let nightEnd = 0;
+  let series = 0;
+  let nightNo = 0;
+  let closing = false;
   let picker = { open: false, shown: false, draft: new Set() }; // impostor-dialogen, skjult til læreren trykker Show
   let killer = { open: false, target: null }; // dialogen for hvem som ble drept
   const seen = new Set();
@@ -146,11 +150,21 @@
         else fx.reveal({ avatars: ['🤝'], title: 'Tie', text: 'Nobody was voted out' });
       });
     }
+    if (phase === 'night') once(`night-${state.code}-${state.night.no}`, () => fx.banner('🌙 Night falls'));
+    if (['ready', 'result'].includes(phase) && state.nightResult && !state.nightResult.killedId) {
+      once(`morning-${state.code}-${state.nightResult.night}`, () => fx.banner('☀️ Morning. Nobody was killed.'));
+    }
     if (phase === 'over') once(`over-${state.code}`, () => fx.confetti({ dark: state.winner !== 'crew' }));
   }
 
   function render() {
     if (!state || !info) return;
+    // Ny runde med de samme spillerne: effektene og inngangsanimasjonene starter på nytt.
+    if (state.series !== series) {
+      series = state.series;
+      played.clear();
+      seen.clear();
+    }
     pendingSeen = [];
     $('screen-create').hidden = true;
     $('screen-game').hidden = false;
@@ -173,6 +187,7 @@
     // Header
     if (phase === 'lobby') setHero('', `Game ${state.code}`, 'Lobby', 'Waiting for students to scan the QR code.');
     else if (phase === 'ready') setHero('', `Game ${state.code}`, 'The game is on', 'Pick the impostors in secret, then open the vote.');
+    else if (phase === 'night') setHero('night', `Game ${state.code}`, 'Night', 'The impostors are choosing.');
     else if (phase === 'voting') setHero('orange', `Game ${state.code}`, state.inRunoff ? `Round ${round} · Runoff` : `Round ${round}`, 'The vote is open.');
     else if (phase === 'result') setHero(result.eliminatedId ? 'sage' : 'orange', `Game ${state.code}`, `Round ${round}`, 'Result');
     else if (phase === 'over') setHero(crewWon ? 'sage' : 'orange', `Game ${state.code}`, crewWon ? 'Crew wins!' : 'Impostors win!', 'The game is over.');
@@ -180,11 +195,14 @@
 
     // Hvem som er drept før denne avstemmingen
     const killed = state.players.filter((player) => (state.killedIds || []).includes(player.id));
-    $('kill-note').hidden = killed.length === 0 || !['ready', 'voting', 'result'].includes(phase);
+    const quietNight = Boolean(state.nightResult && !state.nightResult.killedId);
+    $('kill-note').hidden = !(killed.length || quietNight) || !['ready', 'voting', 'result'].includes(phase);
     if (killed.length) {
       const names = killed.map((player) => player.name);
       const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
-      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.`;
+      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.${quietNight ? ' ☀️ Nobody was killed last night.' : ''}`;
+    } else if (quietNight) {
+      $('kill-note').textContent = '☀️ Nobody was killed last night.';
     }
     playEffects(killed);
 
@@ -195,8 +213,13 @@
     $('qr-url').textContent = info.joinUrl;
 
     // Resultat og vinner
-    $('result-banner').hidden = phase !== 'result' && phase !== 'over';
-    if (phase === 'result') {
+    $('result-banner').hidden = phase !== 'result' && phase !== 'over' && phase !== 'night';
+    $('result-banner').classList.toggle('night-banner', phase === 'night');
+    if (phase === 'night') {
+      $('banner-avatar').textContent = '🌙';
+      $('banner-title').textContent = 'Night';
+      tickNight();
+    } else if (phase === 'result') {
       const out = result.eliminatedId ? byId.get(result.eliminatedId) : null;
       $('banner-avatar').innerHTML = out ? avatarHtml(out) : '🤝';
       if (out) {
@@ -242,17 +265,22 @@
     $('imp-btn').hidden = phase !== 'ready';
     $('imp-btn').textContent = validPick ? 'Change impostors' : 'Pick impostors';
     $('imp-btn').classList.toggle('secondary', validPick);
+    const nightReady = state.activeCount >= 3 && (phase === 'result' || (phase === 'ready' && validPick));
+    $('night-start').hidden = !nightReady;
+    $('night-end-btn').hidden = phase !== 'night';
     $('kill-btn').hidden = !((phase === 'ready' && validPick) || phase === 'result');
-    $('end-btn').hidden = finished;
+    $('end-btn').hidden = finished || phase === 'night';
+    $('again-btn').hidden = !finished;
     $('new-btn').hidden = !finished;
 
     let hint = '';
     if (phase === 'lobby' && !enoughToStart) hint = `You need at least ${state.minPlayers} players to start (${state.players.length}/${state.minPlayers}).`;
     else if (phase === 'ready') {
       hint = validPick
-        ? `${impostorIds.length} ${impostorIds.length === 1 ? 'impostor' : 'impostors'} saved. They are not shown on this screen. Players can now hold a button on their own screen to see their role.`
+        ? `${impostorIds.length} ${impostorIds.length === 1 ? 'impostor' : 'impostors'} saved. They are not shown on this screen. Players can now hold a button on their own screen to see their role. You can start the night, so the impostors choose who to kill, or just open the vote.`
         : 'Pick the impostors first. Nobody else will see them.';
-    } else if (phase === 'voting') hint = 'The vote closes by itself when everyone has voted.';
+    } else if (phase === 'night') hint = 'Everyone else keeps quiet. The night ends when most impostors agree, or when the time is up. If they do not agree, nobody is killed.';
+    else if (phase === 'voting') hint = 'The vote closes by itself when everyone has voted.';
     else if (phase === 'result' && !canVote) hint = 'Not enough players are left for another vote.';
     $('action-hint').textContent = hint;
 
@@ -260,6 +288,18 @@
     for (const key of pendingSeen) seen.add(key);
     pendingSeen = [];
   }
+
+  // Nedtellingen går for seg selv. Når tiden er ute, avslutter vi natten (databasen gjør det også selv).
+  function tickNight() {
+    if (!state || state.phase !== 'night') return;
+    const left = Math.max(0, Math.ceil((nightEnd - Date.now()) / 1000));
+    $('banner-text').textContent = `The impostors are choosing. ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    if (left === 0 && !closing) {
+      closing = true;
+      act('imposter_close_night').finally(() => { closing = false; });
+    }
+  }
+  setInterval(tickNight, 500);
 
   // Tegner bare på nytt når noe faktisk har endret seg, så animasjonene ikke starter om igjen.
   function view() {
@@ -275,6 +315,12 @@
     if (watcher) watcher.stop();
     watcher = api.watchGame({ code: info.code, secret: null, hostSecret: info.secret }, {
       onState(next) {
+        if (next.night) {
+          // Tiden går for seg selv, så den hører ikke med i tilstanden som sammenlignes.
+          nightNo = next.night.no;
+          nightEnd = Date.now() + next.night.endsIn * 1000;
+          next = { ...next, night: { no: next.night.no } };
+        }
         state = next;
         view();
       },
@@ -432,9 +478,19 @@
   $('start-btn').addEventListener('click', () => act('imposter_start_game'));
   $('vote-btn').addEventListener('click', () => act('imposter_start_vote'));
   $('close-btn').addEventListener('click', () => act('imposter_close_vote'));
+  $('night-btn').addEventListener('click', async () => {
+    try {
+      await api.rpc('imposter_start_night', { p_code: info.code, p_host_secret: info.secret, p_seconds: Number($('night-secs').value) });
+    } catch (error) {
+      toast(error.message);
+    }
+    if (watcher) watcher.refresh();
+  });
+  $('night-end-btn').addEventListener('click', () => act('imposter_close_night'));
   $('end-btn').addEventListener('click', () => {
     if (confirm('End the game for everyone?')) act('imposter_end_game');
   });
+  $('again-btn').addEventListener('click', () => act('imposter_new_round'));
   $('new-btn').addEventListener('click', () => {
     clearCreds();
     showCreate();

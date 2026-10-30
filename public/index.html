@@ -70,6 +70,15 @@
         <button class="btn" id="vote-btn" disabled>Vote</button>
       </section>
 
+      <!-- Natt: bare impostorene som er med ser denne. De andre ser venteskjermen. -->
+      <section id="screen-night" hidden>
+        <h2>Who do you kill tonight?</h2>
+        <p class="lead" id="night-lead">Tap a player. You can change your mind. If most of you pick the same player, that player is out. If you do not agree, nobody is killed.</p>
+        <div class="night-time" id="night-time"></div>
+        <div class="progress"><div id="night-bar"></div></div>
+        <ul class="list grid" id="night-list"></ul>
+      </section>
+
       <!-- Resultat -->
       <section id="screen-result" hidden>
         <div class="status" id="result-status">

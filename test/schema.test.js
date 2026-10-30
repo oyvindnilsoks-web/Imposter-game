@@ -467,3 +467,207 @@ test('a lone impostor has no team mates, and a new pick changes the roles', asyn
   assert.equal((await state(game, 2)).myRole, 'crew');
   assert.equal((await state(game, 0)).myRole, 'impostor');
 });
+
+const pick = (game, impostor, target) =>
+  rpc('imposter_night_pick', { p_code: game.code, p_secret: game.players[impostor].secret, p_target: game.players[target].id });
+const startNight = (game, seconds) =>
+  rpc('imposter_start_night', { p_code: game.code, p_host_secret: game.hostSecret, p_seconds: seconds ?? null });
+
+async function readyGame(playerCount, impostors) {
+  const game = await newGame(playerCount);
+  await host(game, 'imposter_start_game');
+  await setImpostors(game, impostors);
+  return game;
+}
+
+test('the night needs saved impostors and the host', async () => {
+  const game = await newGame(5);
+  await host(game, 'imposter_start_game');
+  await assert.rejects(startNight(game), /Pick the impostors first/);
+  await setImpostors(game, [0]);
+  await assert.rejects(
+    rpc('imposter_start_night', { p_code: game.code, p_host_secret: 'x'.repeat(20), p_seconds: 60 }),
+    /Only the host/,
+  );
+  await startNight(game, 60);
+  const s = await state(game, 1);
+  assert.equal(s.phase, 'night');
+  assert.ok(s.night.endsIn > 50 && s.night.endsIn <= 60);
+  await assert.rejects(startNight(game), /can't start the night/);
+  await assert.rejects(host(game, 'imposter_start_vote'), /can't start a vote/);
+});
+
+test('only impostors who are in can choose, and only a crew member who is in', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await startNight(game);
+  await assert.rejects(pick(game, 2, 3), /Only the impostors/);
+  await assert.rejects(pick(game, 0, 1), /Invalid choice/, 'impostors cannot kill each other');
+  await assert.rejects(pick(game, 0, 0), /Invalid choice/);
+  await pick(game, 0, 3);
+});
+
+test('the picks are only shown to impostors who are in', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await startNight(game);
+  await pick(game, 0, 3);
+  await pick(game, 1, 4);
+
+  const imp = await state(game, 1);
+  assert.deepEqual(imp.nightPicks, { [game.players[0].id]: game.players[3].id, [game.players[1].id]: game.players[4].id });
+  for (const view of [await state(game, 2), await state(game), await state(game, null, true)]) {
+    assert.equal(view.nightPicks, null);
+  }
+  for (const view of [await state(game, 2), await state(game)]) assert.equal(view.impostorIds, null);
+});
+
+test('when all impostors agree the night ends at once and the player is killed', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await startNight(game);
+  await pick(game, 0, 3);
+  assert.equal((await state(game)).phase, 'night', 'one of two is not a majority yet');
+  await pick(game, 1, 3);
+  const s = await state(game);
+  assert.equal(s.phase, 'ready');
+  assert.deepEqual(s.killedIds, [game.players[3].id]);
+  assert.equal(s.players[3].eliminated, true);
+  assert.equal(s.nightResult.killedId, game.players[3].id);
+  assert.equal(s.night, null);
+  assert.equal(s.nightPicks, null);
+  await host(game, 'imposter_start_vote');
+  assert.equal((await state(game)).nightResult, null);
+});
+
+test('impostors can change their mind until the night ends', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await startNight(game);
+  await pick(game, 0, 3);
+  await pick(game, 1, 4);
+  assert.equal((await state(game)).phase, 'night', 'no majority, so we wait');
+  await pick(game, 1, 3);
+  assert.equal((await state(game)).players[3].eliminated, true);
+});
+
+test('with three impostors, two that agree are a majority once everyone has chosen', async () => {
+  const game = await readyGame(8, [0, 1, 2]);
+  await startNight(game);
+  await pick(game, 0, 4);
+  await pick(game, 1, 4);
+  assert.equal((await state(game)).phase, 'night', 'the third has not chosen yet');
+  await pick(game, 2, 5);
+  const s = await state(game);
+  assert.equal(s.phase, 'ready');
+  assert.deepEqual(s.killedIds, [game.players[4].id]);
+});
+
+test('no majority means nobody is killed', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await startNight(game);
+  await pick(game, 0, 3);
+  await pick(game, 1, 4);
+  await host(game, 'imposter_close_night');
+  const s = await state(game);
+  assert.equal(s.phase, 'ready');
+  assert.equal(s.killedIds, null);
+  assert.equal(s.nightResult.killedId, null);
+  assert.equal(s.activeCount, 6);
+});
+
+test('a night nobody chose in ends with nobody killed when the time is up', async () => {
+  const game = await readyGame(5, [0]);
+  await startNight(game, 15);
+  await db.query(`update imposter_games set night_ends_at = now() - interval '1 second' where code = $1`, [game.code]);
+  await assert.rejects(pick(game, 0, 1), /not night/);
+  const s = await state(game, 2);
+  assert.equal(s.phase, 'ready');
+  assert.equal(s.nightResult.killedId, null);
+});
+
+test('the time limit is kept within sensible bounds', async () => {
+  const game = await readyGame(5, [0]);
+  await startNight(game, 5000);
+  assert.ok((await state(game)).night.endsIn <= 300);
+});
+
+test('a night after a vote goes back to the result, and the kill can end the game', async () => {
+  const game = await startVoting(4, [0]);
+  await castAll(game, [[0, 1], [1, 0], [2, 0], [3, 0]]);
+  assert.equal((await state(game)).phase, 'over', 'the lone impostor was voted out');
+
+  const g2 = await startVoting(5, [0]);
+  await castAll(g2, [[0, 1], [1, 2], [2, 3], [3, 4], [4, 0]]);
+  // Tie in the first round: nobody out, a runoff comes next
+  assert.equal((await state(g2)).phase, 'result');
+  await startNight(g2);
+  await pick(g2, 0, 1);
+  let s = await state(g2);
+  assert.equal(s.phase, 'result');
+  assert.equal(s.players[1].eliminated, true);
+  assert.equal(s.nightResult.killedId, g2.players[1].id);
+  assert.equal(s.result.round, 1, 'the vote result is kept');
+});
+
+test('the impostors win when a night kill makes them as many as the crew', async () => {
+  const game = await readyGame(3, [0]);
+  await startNight(game);
+  await pick(game, 0, 1);
+  const s = await state(game);
+  assert.equal(s.phase, 'over');
+  assert.equal(s.winner, 'impostors');
+});
+
+test('an impostor who is out cannot choose, and the others decide alone', async () => {
+  const game = await readyGame(8, [0, 1, 2]);
+  await host(game, 'imposter_start_vote');
+  await castAll(game, [[0, 1], [1, 2], [2, 3], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0]]);
+  assert.equal((await state(game)).players[0].eliminated, true);
+  await startNight(game);
+  await assert.rejects(pick(game, 0, 4), /Only the impostors/);
+  assert.equal((await state(game, 0)).nightPicks, null);
+  await pick(game, 1, 4);
+  assert.equal((await state(game)).phase, 'night', 'one of two is not more than half');
+  await pick(game, 2, 4);
+  assert.equal((await state(game)).players[4].eliminated, true);
+});
+
+test('after the game, the host can start a new round with the same players', async () => {
+  const game = await readyGame(3, [0]);
+  await assert.rejects(host(game, 'imposter_new_round'), /not over yet/);
+  await startNight(game);
+  await pick(game, 0, 1);
+  assert.equal((await state(game)).phase, 'over');
+  assert.equal((await state(game)).series, 0);
+
+  await assert.rejects(
+    rpc('imposter_new_round', { p_code: game.code, p_host_secret: 'x'.repeat(20) }),
+    /Only the host/,
+  );
+  await host(game, 'imposter_new_round');
+  const s = await state(game, 1);
+  assert.equal(s.phase, 'lobby');
+  assert.equal(s.round, 0);
+  assert.equal(s.series, 1);
+  assert.equal(s.winner, null);
+  assert.equal(s.result, null);
+  assert.equal(s.killedIds, null);
+  assert.equal(s.nightResult, null);
+  assert.equal(s.players.length, 3);
+  assert.ok(s.players.every((player) => !player.eliminated));
+  assert.equal(s.myRole, null);
+
+  // The same players can play again, with new impostors
+  await host(game, 'imposter_start_game');
+  await setImpostors(game, [2]);
+  await host(game, 'imposter_start_vote');
+  assert.equal((await state(game, 0)).round, 1);
+  await vote(game, 0, 2);
+  await vote(game, 1, 2);
+  await vote(game, 2, 0);
+  assert.equal((await state(game)).winner, 'crew');
+});
+
+test('a game that was ended can also start a new round', async () => {
+  const game = await readyGame(4, [0]);
+  await host(game, 'imposter_end_game');
+  await host(game, 'imposter_new_round');
+  assert.equal((await state(game)).phase, 'lobby');
+});

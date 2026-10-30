@@ -63,9 +63,25 @@ alter table imposter_games add column if not exists vote_count integer not null 
 -- Keeps the player list in the order people joined, even when two join in the same moment.
 alter table imposter_players alter column joined_at set default clock_timestamp();
 
+-- The night: the impostors choose who to kill. night_no counts the nights, night_ends_at is the
+-- deadline, and night_result says what happened ({"killedId": ... or null}).
+alter table imposter_games add column if not exists night_no integer not null default 0;
+alter table imposter_games add column if not exists night_ends_at timestamptz;
+alter table imposter_games add column if not exists night_result jsonb;
+-- Counts the rounds of play with the same players (New round). Screens use it to start fresh.
+alter table imposter_games add column if not exists series integer not null default 0;
+
 alter table imposter_games drop constraint if exists imposter_games_phase_check;
 alter table imposter_games add constraint imposter_games_phase_check
-  check (phase in ('lobby', 'ready', 'voting', 'result', 'over', 'ended'));
+  check (phase in ('lobby', 'ready', 'night', 'voting', 'result', 'over', 'ended'));
+
+-- What each impostor wants to kill tonight. Only the impostors can see this (through get_state).
+create table if not exists imposter_night_picks (
+  game_code text not null references imposter_games (code) on delete cascade,
+  impostor_id uuid not null references imposter_players (id) on delete cascade,
+  target_id uuid not null references imposter_players (id) on delete cascade,
+  primary key (game_code, impostor_id)
+);
 
 -- ---------------------------------------------------------------------------
 -- Security
@@ -75,8 +91,9 @@ alter table imposter_games enable row level security;
 alter table imposter_secrets enable row level security;
 alter table imposter_players enable row level security;
 alter table imposter_votes enable row level security;
+alter table imposter_night_picks enable row level security;
 
-revoke all on imposter_games, imposter_secrets, imposter_players, imposter_votes
+revoke all on imposter_games, imposter_secrets, imposter_players, imposter_votes, imposter_night_picks
   from anon, authenticated;
 
 grant select on imposter_games to anon, authenticated;
@@ -218,6 +235,7 @@ begin
          winner = v_winner,
          runoff_ids = v_runoff,
          killed_ids = null,
+         night_result = null,
          vote_count = v_cast,
          result = jsonb_build_object(
            'round', v_game.round,
@@ -411,41 +429,30 @@ begin
          in_runoff = v_game.runoff_ids is not null,
          vote_count = 0,
          runoff_ids = null,
+         night_result = null,
          updated_at = now()
    where code = v_game.code;
 end;
 $$;
 
--- Host: mark a player as killed. Used between rounds, before the next vote, for the one the
--- impostors got rid of. It counts like a player being out, and it can end the game.
-create or replace function imposter_kill_player(p_code text, p_host_secret text, p_player uuid)
+-- Marks a player as killed. It counts like a player being out, and it can end the game.
+-- p_phase is the phase to go back to when the game is not over.
+create or replace function imposter_kill_internal(p_code text, p_player uuid, p_phase text)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
-  v_target imposter_players;
+  v_game imposter_games;
   v_crew integer;
   v_impostors integer;
-  v_phase text := v_game.phase;
+  v_phase text := p_phase;
   v_winner text;
   v_runoff uuid[];
 begin
-  if v_game.phase not in ('ready', 'result') then
-    raise exception 'You can only mark a kill before a vote.';
-  end if;
-  if not exists (select 1 from imposter_players where game_code = v_game.code and is_impostor) then
-    raise exception 'Pick the impostors first.';
-  end if;
-
-  select * into v_target from imposter_players where id = p_player and game_code = v_game.code;
-  if not found or v_target.eliminated then
-    raise exception 'Invalid choice.';
-  end if;
-
-  update imposter_players set eliminated = true where id = v_target.id;
+  select * into v_game from imposter_games where code = p_code;
+  update imposter_players set eliminated = true where id = p_player;
 
   select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
     into v_crew, v_impostors
@@ -459,7 +466,7 @@ begin
   end if;
 
   -- A waiting runoff loses a candidate. With fewer than two left, the next vote is a normal one.
-  v_runoff := array_remove(v_game.runoff_ids, v_target.id);
+  v_runoff := array_remove(v_game.runoff_ids, p_player);
   if coalesce(array_length(v_runoff, 1), 0) < 2 then
     v_runoff := null;
   end if;
@@ -468,9 +475,187 @@ begin
      set phase = v_phase,
          winner = v_winner,
          runoff_ids = v_runoff,
-         killed_ids = coalesce(killed_ids, '{}') || v_target.id,
+         killed_ids = coalesce(killed_ids, '{}') || p_player,
          updated_at = now()
    where code = v_game.code;
+end;
+$$;
+
+-- Host: mark a player as killed. Used between rounds, before the next vote, for the one the
+-- impostors got rid of (when the night is not played on the phones).
+create or replace function imposter_kill_player(p_code text, p_host_secret text, p_player uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+  v_target imposter_players;
+begin
+  if v_game.phase not in ('ready', 'result') then
+    raise exception 'You can only mark a kill before a vote.';
+  end if;
+  if not exists (select 1 from imposter_players where game_code = v_game.code and is_impostor) then
+    raise exception 'Pick the impostors first.';
+  end if;
+
+  select * into v_target from imposter_players where id = p_player and game_code = v_game.code;
+  if not found or v_target.eliminated then
+    raise exception 'Invalid choice.';
+  end if;
+
+  perform imposter_kill_internal(v_game.code, v_target.id, v_game.phase);
+end;
+$$;
+
+-- Ends the night. The player most impostors picked is killed, but only when more than half of the
+-- impostors still in the game picked that same player. Otherwise nobody is killed.
+create or replace function imposter_close_night_internal(p_code text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games;
+  v_alive integer;
+  v_target uuid;
+  v_back text;
+begin
+  select * into v_game from imposter_games where code = p_code;
+  select count(*) into v_alive
+    from imposter_players where game_code = v_game.code and is_impostor and not eliminated;
+
+  select n.target_id into v_target
+    from imposter_night_picks n
+    join imposter_players i on i.id = n.impostor_id and not i.eliminated
+    join imposter_players t on t.id = n.target_id and not t.eliminated and not t.is_impostor
+   where n.game_code = v_game.code
+   group by n.target_id
+  having count(*) * 2 > v_alive
+   limit 1;
+
+  v_back := case when v_game.round > 0 then 'result' else 'ready' end;
+  delete from imposter_night_picks where game_code = v_game.code;
+
+  update imposter_games
+     set phase = v_back,
+         night_ends_at = null,
+         night_result = jsonb_build_object('night', v_game.night_no, 'killedId', v_target),
+         updated_at = now()
+   where code = v_game.code;
+
+  if v_target is not null then
+    perform imposter_kill_internal(v_game.code, v_target, v_back);
+  end if;
+end;
+$$;
+
+-- Host: start the night. The impostors choose who to kill, in the time given.
+create or replace function imposter_start_night(p_code text, p_host_secret text, p_seconds integer default 60)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+  v_impostors integer;
+  v_crew integer;
+begin
+  if v_game.phase not in ('ready', 'result') then
+    raise exception 'You can''t start the night now.';
+  end if;
+
+  select count(*) filter (where is_impostor and not eliminated), count(*) filter (where not is_impostor and not eliminated)
+    into v_impostors, v_crew
+    from imposter_players where game_code = v_game.code;
+  if not exists (select 1 from imposter_players where game_code = v_game.code and is_impostor) then
+    raise exception 'Pick the impostors first.';
+  end if;
+  if v_impostors >= v_crew then
+    raise exception 'There must be more crew than impostors.';
+  end if;
+
+  delete from imposter_night_picks where game_code = v_game.code;
+  update imposter_games
+     set phase = 'night',
+         night_no = night_no + 1,
+         night_ends_at = now() + make_interval(secs => greatest(15, least(coalesce(p_seconds, 60), 300))),
+         night_result = null,
+         updated_at = now()
+   where code = v_game.code;
+end;
+$$;
+
+-- Impostor: say who you want to kill tonight. You can change it until the night ends.
+-- The night ends early when more than half of the impostors have picked the same player.
+create or replace function imposter_night_pick(p_code text, p_secret text, p_target uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games;
+  v_me imposter_players;
+  v_target imposter_players;
+  v_alive integer;
+  v_picked integer;
+  v_top integer;
+begin
+  select * into v_game from imposter_games where code = upper(btrim(p_code)) for update;
+  if not found then
+    raise exception 'Game not found. Check the code.';
+  end if;
+  if v_game.phase <> 'night' or v_game.night_ends_at < now() then
+    raise exception 'It is not night.';
+  end if;
+
+  select * into v_me from imposter_players where game_code = v_game.code and secret = p_secret;
+  if not found or not v_me.is_impostor or v_me.eliminated then
+    raise exception 'Only the impostors can choose.';
+  end if;
+
+  select * into v_target from imposter_players where id = p_target and game_code = v_game.code;
+  if not found or v_target.eliminated or v_target.is_impostor then
+    raise exception 'Invalid choice.';
+  end if;
+
+  insert into imposter_night_picks (game_code, impostor_id, target_id)
+  values (v_game.code, v_me.id, v_target.id)
+  on conflict (game_code, impostor_id) do update set target_id = excluded.target_id;
+
+  select count(*) into v_alive
+    from imposter_players where game_code = v_game.code and is_impostor and not eliminated;
+  select count(*), coalesce(max(c), 0) into v_picked, v_top from (
+    select count(*) as c from imposter_night_picks where game_code = v_game.code group by target_id
+  ) x;
+
+  -- Everyone has chosen and most agree: no reason to wait.
+  if (select count(*) from imposter_night_picks where game_code = v_game.code) >= v_alive and v_top * 2 > v_alive then
+    perform imposter_close_night_internal(v_game.code);
+  else
+    update imposter_games set updated_at = now() where code = v_game.code;
+  end if;
+end;
+$$;
+
+-- Host: end the night now.
+create or replace function imposter_close_night(p_code text, p_host_secret text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+begin
+  if v_game.phase <> 'night' then
+    raise exception 'It is not night.';
+  end if;
+  perform imposter_close_night_internal(v_game.code);
 end;
 $$;
 
@@ -554,6 +739,42 @@ begin
 end;
 $$;
 
+-- Host: play again with the same players. Everything starts over in the lobby, and the host picks
+-- new impostors after pressing Start. Late players can join in the lobby.
+create or replace function imposter_new_round(p_code text, p_host_secret text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+begin
+  if v_game.phase not in ('over', 'ended') then
+    raise exception 'The game is not over yet.';
+  end if;
+
+  delete from imposter_votes where game_code = v_game.code;
+  delete from imposter_night_picks where game_code = v_game.code;
+  update imposter_players set eliminated = false, is_impostor = false where game_code = v_game.code;
+  update imposter_games
+     set phase = 'lobby',
+         round = 0,
+         result = null,
+         winner = null,
+         runoff_ids = null,
+         candidate_ids = null,
+         in_runoff = false,
+         killed_ids = null,
+         vote_count = 0,
+         night_ends_at = null,
+         night_result = null,
+         series = series + 1,
+         updated_at = now()
+   where code = v_game.code;
+end;
+$$;
+
 -- Host: end the game for everyone.
 create or replace function imposter_end_game(p_code text, p_host_secret text)
 returns void
@@ -595,10 +816,21 @@ declare
   v_roles_set boolean;
   v_my_impostor boolean := false;
   v_mates jsonb;
+  v_night jsonb;
+  v_picks jsonb;
 begin
   select * into v_game from imposter_games where code = upper(btrim(p_code));
   if not found then
     raise exception 'Game not found. Check the code.';
+  end if;
+
+  -- The night ends by itself when the time is up, whoever looks first.
+  if v_game.phase = 'night' and v_game.night_ends_at < now() then
+    select * into v_game from imposter_games where code = v_game.code for update;
+    if v_game.phase = 'night' and v_game.night_ends_at < now() then
+      perform imposter_close_night_internal(v_game.code);
+    end if;
+    select * into v_game from imposter_games where code = v_game.code;
   end if;
 
   if p_secret is not null then
@@ -634,6 +866,18 @@ begin
       select coalesce(jsonb_agg(id order by joined_at, id), '[]'::jsonb)
         into v_mates
         from imposter_players where game_code = v_game.code and is_impostor and id <> v_me;
+    end if;
+  end if;
+
+  if v_game.phase = 'night' then
+    v_night := jsonb_build_object(
+      'endsIn', greatest(0, ceil(extract(epoch from (v_game.night_ends_at - now())))::integer),
+      'no', v_game.night_no
+    );
+    -- The picks are only shown to the impostors who are still in the game.
+    if v_my_impostor and exists (select 1 from imposter_players where id = v_me and not eliminated) then
+      select coalesce(jsonb_object_agg(impostor_id::text, target_id), '{}'::jsonb)
+        into v_picks from imposter_night_picks where game_code = v_game.code;
     end if;
   end if;
 
@@ -676,7 +920,11 @@ begin
       when v_my_impostor then 'impostor'
       else 'crew'
     end,
-    'mates', v_mates
+    'series', v_game.series,
+    'mates', v_mates,
+    'night', v_night,
+    'nightPicks', v_picks,
+    'nightResult', case when v_game.phase in ('ready', 'result') then v_game.night_result else null end
   );
 end;
 $$;
@@ -688,6 +936,8 @@ $$;
 revoke all on function imposter_normalize_name(text) from public, anon, authenticated;
 revoke all on function imposter_lock_host_game(text, text) from public, anon, authenticated;
 revoke all on function imposter_close_vote_internal(text) from public, anon, authenticated;
+revoke all on function imposter_kill_internal(text, uuid, text) from public, anon, authenticated;
+revoke all on function imposter_close_night_internal(text) from public, anon, authenticated;
 
 revoke all on function imposter_create_game(text) from public;
 revoke all on function imposter_join_game(text, text, text) from public;
@@ -698,6 +948,10 @@ revoke all on function imposter_close_vote(text, text) from public;
 revoke all on function imposter_end_game(text, text) from public;
 revoke all on function imposter_set_impostors(text, text, uuid[]) from public;
 revoke all on function imposter_kill_player(text, text, uuid) from public;
+revoke all on function imposter_start_night(text, text, integer) from public;
+revoke all on function imposter_night_pick(text, text, uuid) from public;
+revoke all on function imposter_close_night(text, text) from public;
+revoke all on function imposter_new_round(text, text) from public;
 revoke all on function imposter_get_state(text, text, text) from public;
 
 grant execute on function imposter_create_game(text) to anon, authenticated;
@@ -710,3 +964,7 @@ grant execute on function imposter_end_game(text, text) to anon, authenticated;
 grant execute on function imposter_set_impostors(text, text, uuid[]) to anon, authenticated;
 grant execute on function imposter_kill_player(text, text, uuid) to anon, authenticated;
 grant execute on function imposter_get_state(text, text, text) to anon, authenticated;
+grant execute on function imposter_start_night(text, text, integer) to anon, authenticated;
+grant execute on function imposter_night_pick(text, text, uuid) to anon, authenticated;
+grant execute on function imposter_close_night(text, text) to anon, authenticated;
+grant execute on function imposter_new_round(text, text) to anon, authenticated;

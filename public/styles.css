@@ -53,6 +53,7 @@ body {
 
 .hero.orange { background: var(--mustard); color: var(--ink); }
 .hero.sage { background: var(--sage); color: var(--ink); }
+.hero.night { background: #2f2a4a; color: #fff; }
 
 .hero::before {
   content: '';
@@ -65,7 +66,7 @@ body {
   clip-path: polygon(0 100%, 38% 12%, 52% 40%, 70% 0, 100% 100%);
 }
 
-.hero.orange::before, .hero.sage::before { background: rgba(255, 255, 255, 0.4); }
+.hero.orange::before, .hero.sage::before, .hero.night::before { background: rgba(255, 255, 255, 0.4); }
 
 .hero-eyebrow {
   position: relative;
@@ -729,3 +730,18 @@ body.has-peek .sheet { padding-bottom: 104px; }
   .role-peek { padding: 20px 40px; font-size: 21px; }
   body.has-peek .sheet { padding-bottom: 128px; }
 }
+
+/* Natt */
+.night-time { margin: 0 0 8px; text-align: center; font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#screen-night .progress { margin-bottom: 16px; }
+.backers { display: flex; flex: none; gap: 4px; }
+.backers .avatar { width: 28px; height: 28px; font-size: 16px; border: 2px solid var(--orange); }
+.night-start { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+.night-start .btn { flex: 1; margin-top: 0; }
+.night-secs { display: flex; flex: none; align-items: center; gap: 6px; margin: 0; color: var(--ink); }
+.night-secs select { font: inherit; padding: 10px 6px; border: 2px solid var(--line); border-radius: 12px; background: var(--card); }
+.night-banner .avatar { background: #3d3760; }
+@media (prefers-reduced-motion: no-preference) {
+  .night-banner .avatar { animation: night-glow 3s ease-in-out infinite; }
+}
+@keyframes night-glow { 50% { box-shadow: 0 0 0 10px rgba(246, 195, 111, 0.25); } }
