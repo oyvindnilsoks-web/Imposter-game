@@ -19,6 +19,8 @@ De som er ute (stemt ut eller drept) får en lenke til Glosemester og kan jobbe 
 
 **Roller på egen skjerm:** når du har lagret impostorene, kan hver spiller holde inne knappen «Hold to see your role» nederst på skjermen. Så lenge knappen holdes inne, vises «You are CREW» eller «You are an IMPOSTOR» (med de andre impostorene). Slipper man, forsvinner det. Impostorene ser bare hverandre, og ingen roller vises noe sted på skjermen ellers.
 
+**Natten:** når impostorene er lagret, kan læreren trykke **Start the night** (velg tid: 30 s til 2 min). Tavla og de andre spillerne ser bare «Night falls». Impostorene som fortsatt er med får en egen skjerm der de velger hvem som skal bort (bare crew som er med kan velges). Hver impostor ser hvem lagkameratene har valgt, og kan ombestemme seg til tiden er ute. **Flertallet bestemmer:** mer enn halvparten av impostorene må velge samme spiller, ellers blir ingen drept. Natten slutter med en gang alle har valgt og flertallet er enig, når tiden går ut, eller når læreren trykker **End the night now**. Om morgenen ser alle hvem som er drept («Nobody was killed last night» hvis ingen). Drapet teller som en utkastelse og kan avgjøre spillet. **Someone was killed** finnes fortsatt, for de som spiller natten uten telefoner.
+
 Dialogen for å velge impostorer er sløret helt til du trykker **Show** (trykk **Hide** for å skjule igjen), og valget sendes først når du trykker **Save**. Impostorene vises ikke noe sted på hovedskjermen før spillet er slutt, så du kan trygt vise den på tavla.
 
 ### Bilder

@@ -69,7 +69,12 @@
 
         <button class="btn" id="start-btn" hidden>Start game</button>
         <button class="btn orange" id="imp-btn" hidden>Pick impostors</button>
+        <div class="night-start" id="night-start" hidden>
+          <button class="btn orange" id="night-btn">🌙 Start the night</button>
+          <label class="night-secs">Time <select id="night-secs"><option value="30">30 s</option><option value="60" selected>1 min</option><option value="90">1.5 min</option><option value="120">2 min</option></select></label>
+        </div>
         <button class="btn secondary" id="kill-btn" hidden>💀 Someone was killed</button>
+        <button class="btn secondary" id="night-end-btn" hidden>End the night now</button>
         <button class="btn" id="vote-btn" hidden></button>
         <button class="btn secondary" id="close-btn" hidden>Close vote now</button>
         <div class="hint" id="action-hint"></div>

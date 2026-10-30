@@ -4,11 +4,14 @@
   const api = window.ImposterApi;
   const fx = window.ImposterFx;
   const $ = (id) => document.getElementById(id);
-  const SCREENS = ['join', 'wait', 'vote', 'result'];
+  const SCREENS = ['join', 'wait', 'vote', 'night', 'result'];
 
   let state = null; // tilstanden fra databasen
   let photos = {}; // spillerens id -> bilde, delt live og aldri lagret
   let selected = null;
+  let nightEnd = 0; // når natten slutter, målt på denne enhetens klokke
+  let nightMax = 1; // lengste gjenstående tid vi har sett i natten, til fremdriftsstolpen
+  let nightNo = 0;
   let watcher = null;
   let lastKey = '';
   const seen = new Set();
@@ -193,6 +196,39 @@
       .join('');
   }
 
+  function renderNight(self) {
+    show('night');
+    const mates = new Set(state.mates || []);
+    const picks = state.nightPicks || {};
+    const byId = new Map(state.players.map((player) => [player.id, player]));
+    const targets = state.players.filter((player) => !player.eliminated && player.id !== self.id && !mates.has(player.id));
+    $('night-list').innerHTML = targets.map((player, index) => {
+      const backers = Object.entries(picks)
+        .filter(([impostor, target]) => target === player.id && impostor !== self.id)
+        .map(([impostor]) => byId.get(impostor))
+        .filter(Boolean);
+      return `<li><button class="row choice${isFresh('night', player.id) ? ' fresh' : ''}${picks[self.id] === player.id ? ' selected' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
+        <div class="avatar">${avatarHtml(player)}</div>
+        <div class="name">${esc(player.name)}</div>
+        ${backers.length ? `<span class="backers" title="Your team picked this player">${backers.map((mate) => `<span class="avatar">${avatarHtml(mate)}</span>`).join('')}</span>` : ''}
+        <span class="radio"></span>
+      </button></li>`;
+    }).join('');
+    tickNight();
+  }
+
+  // Nedtellingen går for seg selv, uten at siden tegnes på nytt.
+  function tickNight() {
+    if (!state || state.phase !== 'night') return;
+    const left = Math.max(0, Math.ceil((nightEnd - Date.now()) / 1000));
+    const percent = Math.min(100, (left / nightMax) * 100);
+    $('night-time').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    $('night-bar').style.width = `${percent}%`;
+    $('wait-progress-bar').style.width = `${percent}%`;
+    if (left === 0 && watcher) watcher.refresh();
+  }
+  setInterval(tickNight, 500);
+
   function pct() {
     return state.activeCount ? (state.voteCount / state.activeCount) * 100 : 0;
   }
@@ -215,6 +251,10 @@
         avatar: avatarHtml(player),
         title: player.id === self.id ? 'You were killed' : `${player.name} was killed`,
       }));
+    }
+    if (phase === 'night') once(`night-${state.code}-${state.night.no}`, () => fx.banner('🌙 Night falls'));
+    if (['ready', 'result'].includes(phase) && state.nightResult && !state.nightResult.killedId) {
+      once(`morning-${state.code}-${state.nightResult.night}`, () => fx.banner('☀️ Morning. Nobody was killed.'));
     }
     if (phase === 'voting') {
       once(`vote-${state.code}-${state.round}`, () => fx.banner(state.inRunoff ? '⚔️ Runoff vote!' : '🗳️ Time to vote!'));
@@ -242,18 +282,21 @@
 
     // Hvem som er drept før denne avstemmingen
     const killed = state.players.filter((player) => (state.killedIds || []).includes(player.id));
-    $('kill-note').hidden = killed.length === 0 || !['ready', 'voting', 'result'].includes(phase);
+    const quietNight = Boolean(state.nightResult && !state.nightResult.killedId);
+    $('kill-note').hidden = !(killed.length || quietNight) || !['ready', 'voting', 'result'].includes(phase);
     if (killed.length) {
       const names = killed.map((player) => player.name);
       const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
-      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.`;
+      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.${quietNight ? ' ☀️ Nobody was killed last night.' : ''}`;
+    } else if (quietNight) {
+      $('kill-note').textContent = '☀️ Nobody was killed last night.';
     }
     playEffects(self, killed);
     // De som er ute får en lenke til Glosemester, mens spillet pågår
-    $('out-note').hidden = !(self.eliminated && ['ready', 'voting', 'result'].includes(phase));
+    $('out-note').hidden = !(self.eliminated && ['ready', 'night', 'voting', 'result'].includes(phase));
 
     // Knappen for å se rollen sin finnes når læreren har lagret impostorene
-    const canPeek = Boolean(state.myRole) && ['ready', 'voting', 'result'].includes(phase);
+    const canPeek = Boolean(state.myRole) && ['ready', 'night', 'voting', 'result'].includes(phase);
     $('role-peek').hidden = !canPeek;
     document.body.classList.toggle('has-peek', canPeek);
     if (!canPeek) hideRole();
@@ -270,6 +313,20 @@
         text: self.eliminated ? 'You can watch while the others play.' : 'Your teacher will open the vote.',
         photoButton: true,
       });
+    } else if (phase === 'night') {
+      setHero('night', `Night ${state.night.no}`, 'Night', self.eliminated ? 'You are out of the game' : 'Stay quiet');
+      if (state.myRole === 'impostor' && !self.eliminated) {
+        renderNight(self);
+      } else {
+        showWait({
+          avatar: '🌙',
+          title: 'Night falls',
+          text: self.eliminated ? 'You can watch while the others play.' : 'Close your eyes and stay quiet. The impostors are choosing.',
+          progress: 100,
+          photoButton: true,
+        });
+        tickNight();
+      }
     } else if (phase === 'voting') {
       const heroTitle = state.inRunoff ? 'Runoff vote' : 'Vote';
       if (self.eliminated) {
@@ -324,6 +381,13 @@
     if (watcher) watcher.stop();
     watcher = api.watchGame({ code: session.code, secret: session.secret, presenceKey: session.playerId, photo: myPhoto }, {
       onState(next) {
+        if (next.night) {
+          // Tiden går for seg selv, så den hører ikke med i tilstanden som sammenlignes.
+          if (next.night.no !== nightNo) { nightNo = next.night.no; nightMax = 1; }
+          nightEnd = Date.now() + next.night.endsIn * 1000;
+          nightMax = Math.max(nightMax, next.night.endsIn);
+          next = { ...next, night: { no: next.night.no } };
+        }
         state = next;
         view();
       },
@@ -480,6 +544,26 @@
     selected = button.dataset.id;
     for (const el of $('vote-list').querySelectorAll('.choice')) el.classList.toggle('selected', el === button);
     $('vote-btn').disabled = false;
+  });
+
+  $('night-list').addEventListener('click', async (event) => {
+    const button = event.target.closest('.choice');
+    if (!button || !state || state.phase !== 'night') return;
+    const target = button.dataset.id;
+    const before = state;
+    // Vis valget med en gang. Går noe galt, ruller vi tilbake.
+    state = { ...state, nightPicks: { ...(state.nightPicks || {}), [state.meId]: target } };
+    lastKey = '';
+    view();
+    try {
+      await api.rpc('imposter_night_pick', { p_code: session.code, p_secret: session.secret, p_target: target });
+    } catch (error) {
+      state = before;
+      lastKey = '';
+      view();
+      toast(error.message);
+    }
+    watcher.refresh();
   });
 
   $('vote-btn').addEventListener('click', async () => {
