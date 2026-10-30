@@ -70,6 +70,9 @@
 
   function showJoin(error = '') {
     $('out-note').hidden = true;
+    $('role-peek').hidden = true;
+    document.body.classList.remove('has-peek');
+    hideRole();
     if (watcher) watcher.stop();
     watcher = null;
     state = null;
@@ -249,6 +252,13 @@
     // De som er ute får en lenke til Glosemester, mens spillet pågår
     $('out-note').hidden = !(self.eliminated && ['ready', 'voting', 'result'].includes(phase));
 
+    // Knappen for å se rollen sin finnes når læreren har lagret impostorene
+    const canPeek = Boolean(state.myRole) && ['ready', 'voting', 'result'].includes(phase);
+    $('role-peek').hidden = !canPeek;
+    document.body.classList.toggle('has-peek', canPeek);
+    if (!canPeek) hideRole();
+    if (state.myRole) once(`roles-${state.code}`, () => fx.banner('🎭 Roles are ready. Hold the button to see yours.'));
+
     if (phase === 'lobby') {
       setHero('', `Game ${state.code}`, "You're in!", `Hi, ${self.name}`);
       showWait({ avatar: avatarHtml(self), title: 'Waiting to start', text: 'Your teacher will start the game soon.', list: 'lobby', photoButton: true });
@@ -398,6 +408,40 @@
 
   $('photo-btn').addEventListener('click', () => $('photo-input').click());
   $('wait-photo-btn').addEventListener('click', () => $('photo-input').click());
+
+  // Rollen vises bare mens knappen holdes inne, så ingen ser den over skulderen.
+  function showRole() {
+    if (!state || !state.myRole) return;
+    const sheet = $('role-sheet');
+    if (state.myRole === 'impostor') {
+      const byId = new Map(state.players.map((player) => [player.id, player]));
+      const mates = (state.mates || []).map((id) => byId.get(id)).filter(Boolean);
+      const team = mates.length
+        ? `<p>Your team:</p><div class="role-team">${mates.map((player) => `<div class="role-mate"><div class="avatar">${avatarHtml(player)}</div><span>${esc(player.name)}</span></div>`).join('')}</div>`
+        : '<p>You are the only impostor.</p>';
+      sheet.innerHTML = `<div class="role-icon">🎭</div><h2>You are an IMPOSTOR</h2><p>Do not get voted out.</p>${team}`;
+    } else {
+      sheet.innerHTML = '<div class="role-icon">🧑‍🎓</div><h2>You are CREW</h2><p>Find the impostors and vote them out.</p>';
+    }
+    sheet.className = `role-sheet ${state.myRole}`;
+    sheet.hidden = false;
+  }
+
+  function hideRole() {
+    const sheet = $('role-sheet');
+    sheet.hidden = true;
+    sheet.innerHTML = '';
+  }
+
+  const peek = $('role-peek');
+  peek.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    try { peek.setPointerCapture(event.pointerId); } catch { /* ikke alle nettlesere */ }
+    showRole();
+  });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) peek.addEventListener(type, hideRole);
+  peek.addEventListener('contextmenu', (event) => event.preventDefault());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) hideRole(); });
   $('photo-input').addEventListener('change', async (event) => {
     const file = event.target.files && event.target.files[0];
     event.target.value = '';

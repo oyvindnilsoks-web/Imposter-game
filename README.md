@@ -17,6 +17,8 @@ Hvis noen har mistet nettet og avstemmingen står fast, trykk **Close vote now**
 
 De som er ute (stemt ut eller drept) får en lenke til Glosemester og kan jobbe med ordene mens de venter på at de andre skal bli ferdige. Lenken ligger i `public/index.html` (`#out-note`).
 
+**Roller på egen skjerm:** når du har lagret impostorene, kan hver spiller holde inne knappen «Hold to see your role» nederst på skjermen. Så lenge knappen holdes inne, vises «You are CREW» eller «You are an IMPOSTOR» (med de andre impostorene). Slipper man, forsvinner det. Impostorene ser bare hverandre, og ingen roller vises noe sted på skjermen ellers.
+
 Dialogen for å velge impostorer er sløret helt til du trykker **Show** (trykk **Hide** for å skjule igjen), og valget sendes først når du trykker **Save**. Impostorene vises ikke noe sted på hovedskjermen før spillet er slutt, så du kan trygt vise den på tavla.
 
 ### Bilder
