@@ -430,3 +430,40 @@ test('players stay marked as online when they refresh often', async () => {
   assert.equal(after.meId, game.players[0].id);
   assert.equal(after.players[0].connected, true);
 });
+
+test('a player sees their own role once the impostors are saved, and impostors see each other', async () => {
+  const game = await newGame(5);
+  await host(game, 'imposter_start_game');
+  assert.equal((await state(game, 0)).myRole, null, 'no role before the host has picked');
+
+  await setImpostors(game, [1, 3]);
+  const crew = await state(game, 0);
+  assert.equal(crew.myRole, 'crew');
+  assert.equal(crew.mates, null);
+  assert.equal(crew.impostorIds, null);
+
+  const first = await state(game, 1);
+  assert.equal(first.myRole, 'impostor');
+  assert.deepEqual(first.mates, [game.players[3].id]);
+  assert.deepEqual((await state(game, 3)).mates, [game.players[1].id]);
+
+  // Nobody learns anything without their own key
+  const nobody = await state(game);
+  assert.equal(nobody.myRole, null);
+  assert.equal(nobody.mates, null);
+  assert.equal(nobody.impostorIds, null);
+});
+
+test('a lone impostor has no team mates, and a new pick changes the roles', async () => {
+  const game = await newGame(4);
+  await host(game, 'imposter_start_game');
+  await setImpostors(game, [2]);
+  const lone = await state(game, 2);
+  assert.equal(lone.myRole, 'impostor');
+  assert.deepEqual(lone.mates, []);
+  assert.equal((await state(game, 0)).myRole, 'crew');
+
+  await setImpostors(game, [0]);
+  assert.equal((await state(game, 2)).myRole, 'crew');
+  assert.equal((await state(game, 0)).myRole, 'impostor');
+});

@@ -592,6 +592,9 @@ declare
   v_votes integer;
   v_is_host boolean := false;
   v_impostors jsonb;
+  v_roles_set boolean;
+  v_my_impostor boolean := false;
+  v_mates jsonb;
 begin
   select * into v_game from imposter_games where code = upper(btrim(p_code));
   if not found then
@@ -619,6 +622,19 @@ begin
     select coalesce(jsonb_agg(id order by joined_at, id), '[]'::jsonb)
       into v_impostors
       from imposter_players where game_code = v_game.code and is_impostor;
+  end if;
+
+  -- A player can see their own role once the host has saved the impostors.
+  -- An impostor also sees the other impostors. Nobody else gets any of this.
+  select exists (select 1 from imposter_players where game_code = v_game.code and is_impostor)
+    into v_roles_set;
+  if v_me is not null and v_roles_set then
+    select is_impostor into v_my_impostor from imposter_players where id = v_me;
+    if v_my_impostor then
+      select coalesce(jsonb_agg(id order by joined_at, id), '[]'::jsonb)
+        into v_mates
+        from imposter_players where game_code = v_game.code and is_impostor and id <> v_me;
+    end if;
   end if;
 
   select coalesce(jsonb_agg(
@@ -654,7 +670,13 @@ begin
     'killedIds', to_jsonb(v_game.killed_ids),
     'impostorIds', v_impostors,
     'meId', v_me,
-    'myVote', v_my_vote
+    'myVote', v_my_vote,
+    'myRole', case
+      when v_me is null or not v_roles_set then null
+      when v_my_impostor then 'impostor'
+      else 'crew'
+    end,
+    'mates', v_mates
   );
 end;
 $$;
