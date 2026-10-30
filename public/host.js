@@ -10,6 +10,7 @@
   let watcher = null;
   let lastKey = '';
   let nightEnd = 0;
+  let series = 0;
   let nightNo = 0;
   let closing = false;
   let picker = { open: false, shown: false, draft: new Set() }; // impostor-dialogen, skjult til læreren trykker Show
@@ -158,6 +159,12 @@
 
   function render() {
     if (!state || !info) return;
+    // Ny runde med de samme spillerne: effektene og inngangsanimasjonene starter på nytt.
+    if (state.series !== series) {
+      series = state.series;
+      played.clear();
+      seen.clear();
+    }
     pendingSeen = [];
     $('screen-create').hidden = true;
     $('screen-game').hidden = false;
@@ -263,6 +270,7 @@
     $('night-end-btn').hidden = phase !== 'night';
     $('kill-btn').hidden = !((phase === 'ready' && validPick) || phase === 'result');
     $('end-btn').hidden = finished || phase === 'night';
+    $('again-btn').hidden = !finished;
     $('new-btn').hidden = !finished;
 
     let hint = '';
@@ -482,6 +490,7 @@
   $('end-btn').addEventListener('click', () => {
     if (confirm('End the game for everyone?')) act('imposter_end_game');
   });
+  $('again-btn').addEventListener('click', () => act('imposter_new_round'));
   $('new-btn').addEventListener('click', () => {
     clearCreds();
     showCreate();

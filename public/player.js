@@ -12,6 +12,7 @@
   let nightEnd = 0; // når natten slutter, målt på denne enhetens klokke
   let nightMax = 1; // lengste gjenstående tid vi har sett i natten, til fremdriftsstolpen
   let nightNo = 0;
+  let series = 0;
   let watcher = null;
   let lastKey = '';
   const seen = new Set();
@@ -274,6 +275,12 @@
   function render() {
     const self = state && state.players.find((player) => player.id === state.meId);
     if (!self) return showJoin();
+    // Ny runde med de samme spillerne: effektene og inngangsanimasjonene starter på nytt.
+    if (state.series !== series) {
+      series = state.series;
+      played.clear();
+      seen.clear();
+    }
     pendingSeen = [];
 
     const phase = state.phase;

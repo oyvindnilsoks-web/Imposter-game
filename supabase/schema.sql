@@ -68,6 +68,8 @@ alter table imposter_players alter column joined_at set default clock_timestamp(
 alter table imposter_games add column if not exists night_no integer not null default 0;
 alter table imposter_games add column if not exists night_ends_at timestamptz;
 alter table imposter_games add column if not exists night_result jsonb;
+-- Counts the rounds of play with the same players (New round). Screens use it to start fresh.
+alter table imposter_games add column if not exists series integer not null default 0;
 
 alter table imposter_games drop constraint if exists imposter_games_phase_check;
 alter table imposter_games add constraint imposter_games_phase_check
@@ -737,6 +739,42 @@ begin
 end;
 $$;
 
+-- Host: play again with the same players. Everything starts over in the lobby, and the host picks
+-- new impostors after pressing Start. Late players can join in the lobby.
+create or replace function imposter_new_round(p_code text, p_host_secret text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+begin
+  if v_game.phase not in ('over', 'ended') then
+    raise exception 'The game is not over yet.';
+  end if;
+
+  delete from imposter_votes where game_code = v_game.code;
+  delete from imposter_night_picks where game_code = v_game.code;
+  update imposter_players set eliminated = false, is_impostor = false where game_code = v_game.code;
+  update imposter_games
+     set phase = 'lobby',
+         round = 0,
+         result = null,
+         winner = null,
+         runoff_ids = null,
+         candidate_ids = null,
+         in_runoff = false,
+         killed_ids = null,
+         vote_count = 0,
+         night_ends_at = null,
+         night_result = null,
+         series = series + 1,
+         updated_at = now()
+   where code = v_game.code;
+end;
+$$;
+
 -- Host: end the game for everyone.
 create or replace function imposter_end_game(p_code text, p_host_secret text)
 returns void
@@ -882,6 +920,7 @@ begin
       when v_my_impostor then 'impostor'
       else 'crew'
     end,
+    'series', v_game.series,
     'mates', v_mates,
     'night', v_night,
     'nightPicks', v_picks,
@@ -912,6 +951,7 @@ revoke all on function imposter_kill_player(text, text, uuid) from public;
 revoke all on function imposter_start_night(text, text, integer) from public;
 revoke all on function imposter_night_pick(text, text, uuid) from public;
 revoke all on function imposter_close_night(text, text) from public;
+revoke all on function imposter_new_round(text, text) from public;
 revoke all on function imposter_get_state(text, text, text) from public;
 
 grant execute on function imposter_create_game(text) to anon, authenticated;
@@ -927,3 +967,4 @@ grant execute on function imposter_get_state(text, text, text) to anon, authenti
 grant execute on function imposter_start_night(text, text, integer) to anon, authenticated;
 grant execute on function imposter_night_pick(text, text, uuid) to anon, authenticated;
 grant execute on function imposter_close_night(text, text) to anon, authenticated;
+grant execute on function imposter_new_round(text, text) to anon, authenticated;

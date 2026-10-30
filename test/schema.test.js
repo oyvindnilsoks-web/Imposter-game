@@ -628,3 +628,46 @@ test('an impostor who is out cannot choose, and the others decide alone', async 
   await pick(game, 2, 4);
   assert.equal((await state(game)).players[4].eliminated, true);
 });
+
+test('after the game, the host can start a new round with the same players', async () => {
+  const game = await readyGame(3, [0]);
+  await assert.rejects(host(game, 'imposter_new_round'), /not over yet/);
+  await startNight(game);
+  await pick(game, 0, 1);
+  assert.equal((await state(game)).phase, 'over');
+  assert.equal((await state(game)).series, 0);
+
+  await assert.rejects(
+    rpc('imposter_new_round', { p_code: game.code, p_host_secret: 'x'.repeat(20) }),
+    /Only the host/,
+  );
+  await host(game, 'imposter_new_round');
+  const s = await state(game, 1);
+  assert.equal(s.phase, 'lobby');
+  assert.equal(s.round, 0);
+  assert.equal(s.series, 1);
+  assert.equal(s.winner, null);
+  assert.equal(s.result, null);
+  assert.equal(s.killedIds, null);
+  assert.equal(s.nightResult, null);
+  assert.equal(s.players.length, 3);
+  assert.ok(s.players.every((player) => !player.eliminated));
+  assert.equal(s.myRole, null);
+
+  // The same players can play again, with new impostors
+  await host(game, 'imposter_start_game');
+  await setImpostors(game, [2]);
+  await host(game, 'imposter_start_vote');
+  assert.equal((await state(game, 0)).round, 1);
+  await vote(game, 0, 2);
+  await vote(game, 1, 2);
+  await vote(game, 2, 0);
+  assert.equal((await state(game)).winner, 'crew');
+});
+
+test('a game that was ended can also start a new round', async () => {
+  const game = await readyGame(4, [0]);
+  await host(game, 'imposter_end_game');
+  await host(game, 'imposter_new_round');
+  assert.equal((await state(game)).phase, 'lobby');
+});
