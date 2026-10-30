@@ -15,6 +15,8 @@ Et live impostor-spill for engelskundervisning. Elevene scanner en QR-kode for �
 
 Hvis noen har mistet nettet og avstemmingen står fast, trykk **Close vote now**.
 
+De som er ute (stemt ut eller drept) får en lenke til Glosemester og kan jobbe med ordene mens de venter på at de andre skal bli ferdige. Lenken ligger i `public/index.html` (`#out-note`).
+
 Dialogen for å velge impostorer er sløret helt til du trykker **Show** (trykk **Hide** for å skjule igjen), og valget sendes først når du trykker **Save**. Impostorene vises ikke noe sted på hovedskjermen før spillet er slutt, så du kan trygt vise den på tavla.
 
 ### Bilder
