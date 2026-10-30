@@ -79,6 +79,8 @@ window.ImposterApi = (() => {
 
     // En stemme endrer bare antallet stemmer på spillraden. Da holder det å sende tallet videre
     // i stedet for at alle skjermer henter hele tilstanden på nytt. Alt annet henter vi som før.
+    // Supabase garanterer ikke at hendelsene kommer i rekkefølge, så et lavere tall enn det vi
+    // allerede har sett er en forsinket hendelse, og den ignoreres.
     let lastSignature = null;
     let lastVotes = null;
     function onChange(payload) {
@@ -86,11 +88,16 @@ window.ImposterApi = (() => {
       if (!row) return refresh();
       const { vote_count: votes, updated_at: ignored, ...rest } = row;
       const signature = JSON.stringify(rest);
-      const onlyVotes = Boolean(onVotes) && typeof votes === 'number' && lastSignature === signature && votes !== lastVotes;
+      if (onVotes && typeof votes === 'number' && lastSignature === signature && lastVotes !== null) {
+        if (votes > lastVotes) {
+          lastVotes = votes;
+          return onVotes(votes);
+        }
+        if (votes < lastVotes) return;
+      }
       lastSignature = signature;
       lastVotes = typeof votes === 'number' ? votes : null;
-      if (onlyVotes) onVotes(votes);
-      else refresh();
+      refresh();
     }
 
     let channel = null;
