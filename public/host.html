@@ -8,10 +8,19 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#5e6e4f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="The Impostor">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <link rel="icon" href="/icons/icon-192.png">
 </head>
 <body>
   <div class="app wide">
     <header class="hero" id="hero">
+      <button type="button" class="icon-btn" id="fs-btn" aria-label="Fullscreen" hidden>⛶</button>
       <div class="hero-brand">🎭 The Impostor</div>
       <div class="hero-eyebrow" id="hero-eyebrow">Teacher view</div>
       <h1 id="hero-title">Create a game</h1>
@@ -110,6 +119,7 @@
   <script src="/vendor/supabase.js"></script>
   <script src="/vendor/qrcode.js"></script>
   <script src="/api.js"></script>
+  <script src="/fx.js"></script>
   <script src="/host.js"></script>
 </body>
 </html>

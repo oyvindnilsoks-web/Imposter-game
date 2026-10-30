@@ -8,10 +8,19 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#5e6e4f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="The Impostor">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <link rel="icon" href="/icons/icon-192.png">
 </head>
 <body>
   <div class="app">
     <header class="hero" id="hero">
+      <button type="button" class="icon-btn" id="fs-btn" aria-label="Fullscreen" hidden>⛶</button>
       <div class="hero-brand">🎭 The Impostor</div>
       <div class="hero-eyebrow" id="hero-eyebrow">Join with a code</div>
       <h1 id="hero-title">Join the game</h1>
@@ -71,6 +80,12 @@
         <div class="section-title">Votes <span id="result-round"></span></div>
         <ul class="list grid" id="result-list"></ul>
       </section>
+      <!-- Til de som er ute: noe nyttig å gjøre mens de andre blir ferdige. -->
+      <div class="out-note" id="out-note" hidden>
+        <strong>You are out, but you can keep learning.</strong>
+        <span>Work on your words while you wait for the others to finish.</span>
+        <a class="btn orange compact" href="https://glosemester.netlify.app" target="_blank" rel="noopener">Open Glosemester</a>
+      </div>
     </main>
   </div>
   <!-- Delt av join-skjermen og ventesiden, så den finnes uansett hvilken skjerm som vises. -->
@@ -80,6 +95,7 @@
   <script src="/config.js"></script>
   <script src="/vendor/supabase.js"></script>
   <script src="/api.js"></script>
+  <script src="/fx.js"></script>
   <script src="/player.js"></script>
 </body>
 </html>

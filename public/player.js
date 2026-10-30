@@ -2,6 +2,7 @@
   const STORE_KEY = 'imposter-player';
   const PHOTO_KEY = 'imposter-photo';
   const api = window.ImposterApi;
+  const fx = window.ImposterFx;
   const $ = (id) => document.getElementById(id);
   const SCREENS = ['join', 'wait', 'vote', 'result'];
 
@@ -68,6 +69,7 @@
   }
 
   function showJoin(error = '') {
+    $('out-note').hidden = true;
     if (watcher) watcher.stop();
     watcher = null;
     state = null;
@@ -192,6 +194,40 @@
     return state.activeCount ? (state.voteCount / state.activeCount) * 100 : 0;
   }
 
+  // Effekter når noe skjer live. Første tegning (for eksempel etter en omlasting) spilles ikke av.
+  const played = new Set();
+  let effectsReady = false;
+  function once(key, play) {
+    if (played.has(key)) return;
+    played.add(key);
+    if (effectsReady) play();
+  }
+
+  function playEffects(self, killed) {
+    const { phase, result } = state;
+    const byId = new Map(state.players.map((player) => [player.id, player]));
+
+    for (const player of killed) {
+      once(`kill-${state.code}-${player.id}`, () => fx.kill({
+        avatar: avatarHtml(player),
+        title: player.id === self.id ? 'You were killed' : `${player.name} was killed`,
+      }));
+    }
+    if (phase === 'voting') {
+      once(`vote-${state.code}-${state.round}`, () => fx.banner(state.inRunoff ? '⚔️ Runoff vote!' : '🗳️ Time to vote!'));
+    }
+    if ((phase === 'result' || phase === 'over') && result) {
+      once(`result-${state.code}-${result.round}`, () => {
+        const out = result.eliminatedId ? byId.get(result.eliminatedId) : null;
+        const tied = state.players.filter((player) => (result.runoffIds || []).includes(player.id) && !player.eliminated);
+        if (out) fx.reveal({ avatars: [avatarHtml(out)], title: out.id === self.id ? 'You are out!' : `${out.name} is out!`, text: 'Most votes' });
+        else if (tied.length >= 2) fx.reveal({ avatars: tied.map((player) => avatarHtml(player)), title: 'Tie!', text: 'A runoff vote is next' });
+        else fx.reveal({ avatars: ['🤝'], title: 'Tie', text: 'Nobody was voted out' });
+      });
+    }
+    if (phase === 'over') once(`over-${state.code}`, () => fx.confetti({ dark: state.winner !== 'crew' }));
+  }
+
   function render() {
     const self = state && state.players.find((player) => player.id === state.meId);
     if (!self) return showJoin();
@@ -209,6 +245,9 @@
       const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
       $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.`;
     }
+    playEffects(self, killed);
+    // De som er ute får en lenke til Glosemester, mens spillet pågår
+    $('out-note').hidden = !(self.eliminated && ['ready', 'voting', 'result'].includes(phase));
 
     if (phase === 'lobby') {
       setHero('', `Game ${state.code}`, "You're in!", `Hi, ${self.name}`);
@@ -255,6 +294,7 @@
       setHero('', `Game ${state.code}`, 'The game is over', 'Thanks for playing!');
       showWait({ avatar: '🎉', title: 'Thanks for playing!', text: 'Your teacher has ended the game.' });
     }
+    effectsReady = true;
     for (const key of pendingSeen) seen.add(key);
     pendingSeen = [];
   }
@@ -426,6 +466,8 @@
   else if (session) $('code').value = session.code;
   if (session) $('name').value = session.name;
 
+  fx.setupFullscreen($('fs-btn'));
+  fx.keepAwake();
   showPhotoPreview();
   showJoin();
   if (session && api.isReady) resume();

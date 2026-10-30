@@ -1,6 +1,7 @@
 (() => {
   const STORE_KEY = 'imposter-host';
   const api = window.ImposterApi;
+  const fx = window.ImposterFx;
   const $ = (id) => document.getElementById(id);
 
   let state = null;
@@ -120,6 +121,34 @@
     return `<li class="${classes.join(' ')}" style="--i:${index}">${inner}</li>`;
   }
 
+  // Effekter når noe skjer live (på tavla). Første tegning, for eksempel etter en omlasting, spilles ikke av.
+  const played = new Set();
+  let effectsReady = false;
+  function once(key, play) {
+    if (played.has(key)) return;
+    played.add(key);
+    if (effectsReady) play();
+  }
+
+  function playEffects(killed) {
+    const { phase, result } = state;
+    const byId = new Map(state.players.map((player) => [player.id, player]));
+
+    for (const player of killed) {
+      once(`kill-${state.code}-${player.id}`, () => fx.kill({ avatar: avatarHtml(player), title: `${player.name} was killed` }));
+    }
+    if ((phase === 'result' || phase === 'over') && result) {
+      once(`result-${state.code}-${result.round}`, () => {
+        const out = result.eliminatedId ? byId.get(result.eliminatedId) : null;
+        const tied = state.players.filter((player) => (result.runoffIds || []).includes(player.id) && !player.eliminated);
+        if (out) fx.reveal({ avatars: [avatarHtml(out)], title: `${out.name} is out!`, text: `Got the most votes (${result.counts[out.id]})` });
+        else if (tied.length >= 2) fx.reveal({ avatars: tied.map((player) => avatarHtml(player)), title: 'Tie!', text: 'A runoff vote is next' });
+        else fx.reveal({ avatars: ['🤝'], title: 'Tie', text: 'Nobody was voted out' });
+      });
+    }
+    if (phase === 'over') once(`over-${state.code}`, () => fx.confetti({ dark: state.winner !== 'crew' }));
+  }
+
   function render() {
     if (!state || !info) return;
     pendingSeen = [];
@@ -157,6 +186,7 @@
       const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
       $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.`;
     }
+    playEffects(killed);
 
     // QR vises i lobbyen
     $('qr-block').hidden = phase !== 'lobby';
@@ -226,6 +256,7 @@
     else if (phase === 'result' && !canVote) hint = 'Not enough players are left for another vote.';
     $('action-hint').textContent = hint;
 
+    effectsReady = true;
     for (const key of pendingSeen) seen.add(key);
     pendingSeen = [];
   }
@@ -409,6 +440,8 @@
     showCreate();
   });
 
+  fx.setupFullscreen($('fs-btn'));
+  fx.keepAwake();
   showCreate();
   const saved = loadCreds();
   if (saved && api.isReady) adopt(saved.code, saved.secret);
