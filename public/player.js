@@ -519,6 +519,10 @@
     $('task-feedback').className = 'task-feedback';
     $('task-next').hidden = true;
     $('task-prompt').textContent = 'Loading...';
+    // Fjern det forrige svaret med en gang, så man ikke kan trykke på en gammel oppgave mens neste hentes.
+    $('task-options').innerHTML = '';
+    $('task-built').hidden = true;
+    $('task-check').hidden = true;
     try {
       task = await api.rpc('imposter_next_task', { p_code: session.code, p_secret: session.secret });
     } catch (error) {
