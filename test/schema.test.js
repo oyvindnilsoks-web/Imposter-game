@@ -325,3 +325,108 @@ test('the browser role can read games but not secrets, players or votes', async 
     await db.exec('reset role');
   }
 });
+
+const kill = (game, target) =>
+  rpc('imposter_kill_player', { p_code: game.code, p_host_secret: game.hostSecret, p_player: game.players[target].id });
+
+test('the host can mark a player as killed before a vote, and the player is out for everyone', async () => {
+  const game = await newGame(5);
+  await assert.rejects(kill(game, 3), /before a vote/); // lobby
+  await host(game, 'imposter_start_game');
+  await assert.rejects(kill(game, 3), /Pick the impostors first/);
+  await setImpostors(game, [0]);
+
+  await kill(game, 3);
+  const after = await state(game);
+  assert.equal(after.phase, 'ready');
+  assert.equal(after.players[3].eliminated, true);
+  assert.deepEqual(after.killedIds, [game.players[3].id]);
+  assert.equal(after.activeCount, 4);
+  await assert.rejects(kill(game, 3), /Invalid choice/);
+
+  // The dead player cannot be voted for or vote, and the kill stays visible during the vote.
+  await host(game, 'imposter_start_vote');
+  assert.deepEqual((await state(game)).killedIds, [game.players[3].id]);
+  await assert.rejects(vote(game, 0, 3), /Invalid choice/);
+  await assert.rejects(vote(game, 3, 0), /not in this vote/);
+  await assert.rejects(kill(game, 2), /before a vote/);
+
+  // Only the four who are alive vote, and the kill is cleared when the vote closes.
+  await castAll(game, [[0, 1], [2, 1], [4, 1], [1, 0]]);
+  const result = await state(game);
+  assert.equal(result.phase, 'result');
+  assert.equal(result.result.eliminatedId, game.players[1].id);
+  assert.equal(result.killedIds, null);
+});
+
+test('only the host can mark a kill', async () => {
+  const game = await newGame(4);
+  await host(game, 'imposter_start_game');
+  await setImpostors(game, [0]);
+  await assert.rejects(
+    rpc('imposter_kill_player', { p_code: game.code, p_host_secret: secret(), p_player: game.players[1].id }),
+    /Only the host/,
+  );
+  await assert.rejects(
+    rpc('imposter_kill_player', { p_code: game.code, p_host_secret: game.players[0].secret, p_player: game.players[1].id }),
+    /Only the host/,
+  );
+});
+
+test('kills can end the game, like votes do', async () => {
+  const crewGone = await newGame(4);
+  await host(crewGone, 'imposter_start_game');
+  await setImpostors(crewGone, [0]);
+  await kill(crewGone, 1);
+  assert.equal((await state(crewGone)).phase, 'ready');
+  await kill(crewGone, 2);
+  const lost = await state(crewGone);
+  assert.equal(lost.phase, 'over');
+  assert.equal(lost.winner, 'impostors');
+  assert.deepEqual(lost.impostorIds, [crewGone.players[0].id]);
+  await assert.rejects(host(crewGone, 'imposter_start_vote'), /can't start a vote/);
+
+  const impostorGone = await newGame(4);
+  await host(impostorGone, 'imposter_start_game');
+  await setImpostors(impostorGone, [0]);
+  await kill(impostorGone, 0);
+  assert.equal((await state(impostorGone)).winner, 'crew');
+});
+
+test('a kill between rounds removes the player from a waiting runoff', async () => {
+  const game = await startVoting(6);
+  await castAll(game, [[0, 1], [3, 1], [1, 2], [4, 2], [2, 0], [5, 3]]);
+  assert.equal((await state(game)).result.runoffIds.length, 2);
+
+  await kill(game, 1);
+  await host(game, 'imposter_start_vote');
+  const next = await state(game);
+  assert.equal(next.inRunoff, false);
+  assert.equal(next.candidateIds, null);
+  assert.equal(next.activeCount, 5);
+});
+
+test('the vote count travels on the game row, and starts over each round', async () => {
+  const game = await startVoting(4);
+  const count = async () => (await db.query('select vote_count from imposter_games where code = $1', [game.code])).rows[0].vote_count;
+  assert.equal(await count(), 0);
+
+  await vote(game, 0, 1);
+  assert.equal(await count(), 1);
+  await vote(game, 2, 1);
+  assert.equal(await count(), 2);
+  await castAll(game, [[3, 1], [1, 0]]);
+  assert.equal((await state(game)).phase, 'result');
+  assert.equal(await count(), 4);
+
+  await host(game, 'imposter_start_vote');
+  assert.equal(await count(), 0);
+});
+
+test('players stay marked as online when they refresh often', async () => {
+  const game = await newGame(3);
+  for (let i = 0; i < 3; i++) await state(game, 0);
+  const after = await state(game, 0);
+  assert.equal(after.meId, game.players[0].id);
+  assert.equal(after.players[0].connected, true);
+});

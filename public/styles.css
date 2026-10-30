@@ -493,3 +493,24 @@ button, input { touch-action: manipulation; }
 .imp-reveal:active { transform: translate(-50%, -50%) scale(0.98); }
 
 .toast { z-index: 30; }
+
+/* Legg til eller bytt bilde mens eleven venter */
+.photo-add { display: flex; justify-content: center; }
+.btn.compact { width: auto; display: inline-block; margin-top: 14px; padding: 12px 24px; font-size: 16px; }
+@media (min-width: 700px) {
+  .btn.compact { padding: 16px 34px; font-size: 19px; }
+}
+
+/* Melding om hvem som er drept */
+.notice {
+  margin: 0 0 16px;
+  padding: 12px 18px;
+  font-weight: 600;
+  color: #7a2e1d;
+  background: #fbe6df;
+  border-radius: 18px;
+  animation: rise 0.4s ease backwards;
+}
+@media (min-width: 700px) {
+  .notice { padding: 16px 24px; font-size: 20px; border-radius: 22px; }
+}

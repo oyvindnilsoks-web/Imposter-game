@@ -15,6 +15,7 @@ const PUBLIC_FUNCTIONS = new Set([
   'imposter_join_game',
   'imposter_start_game',
   'imposter_set_impostors',
+  'imposter_kill_player',
   'imposter_start_vote',
   'imposter_cast_vote',
   'imposter_close_vote',

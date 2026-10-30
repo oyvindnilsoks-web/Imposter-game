@@ -107,11 +107,14 @@
   }
 
   // avatar er ferdig HTML: enten et bilde/emoji fra avatarHtml, eller en fast emoji.
-  function showWait({ avatar, title, text, progress, list, count }) {
+  function showWait({ avatar, title, text, progress, list, count, photoButton }) {
     show('wait');
     $('wait-avatar').innerHTML = avatar;
     $('wait-title').textContent = title;
     $('wait-text').textContent = text;
+    // Eleven kan legge til eller bytte bilde mens hen venter (der avataren er hens egen).
+    $('wait-photo-btn').hidden = !photoButton;
+    $('wait-photo-btn').textContent = myPhoto ? '📷 Change photo' : '📷 Add a photo';
 
     $('wait-progress').hidden = progress == null;
     if (progress != null) $('wait-progress-bar').style.width = `${progress}%`;
@@ -152,7 +155,8 @@
     const { result } = state;
     const byId = new Map(state.players.map((player) => [player.id, player]));
     const out = result.eliminatedId ? byId.get(result.eliminatedId) : null;
-    const tied = (result.runoffIds || []).map((id) => byId.get(id)).filter(Boolean);
+    // I rekkefølgen spillerne ble med, så teksten alltid er lik for alle.
+    const tied = state.players.filter((player) => (result.runoffIds || []).includes(player.id));
 
     $('result-status').className = `status${out && out.id === self.id ? ' alert' : ''}`;
     if (out) {
@@ -195,18 +199,33 @@
 
     const phase = state.phase;
     const title = `Round ${state.round}`;
+    const killedSelf = self.eliminated && (state.killedIds || []).includes(self.id);
+
+    // Hvem som er drept før denne avstemmingen
+    const killed = state.players.filter((player) => (state.killedIds || []).includes(player.id));
+    $('kill-note').hidden = killed.length === 0 || !['ready', 'voting', 'result'].includes(phase);
+    if (killed.length) {
+      const names = killed.map((player) => player.name);
+      const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.`;
+    }
 
     if (phase === 'lobby') {
       setHero('', `Game ${state.code}`, "You're in!", `Hi, ${self.name}`);
-      showWait({ avatar: avatarHtml(self), title: 'Waiting to start', text: 'Your teacher will start the game soon.', list: 'lobby' });
+      showWait({ avatar: avatarHtml(self), title: 'Waiting to start', text: 'Your teacher will start the game soon.', list: 'lobby', photoButton: true });
     } else if (phase === 'ready') {
       setHero('', `Game ${state.code}`, 'The game is on', `Hi, ${self.name}`);
-      showWait({ avatar: avatarHtml(self), title: 'The game has started', text: 'Your teacher will open the vote.' });
+      showWait({
+        avatar: avatarHtml(self),
+        title: killedSelf ? 'You were killed' : self.eliminated ? 'You are out' : 'The game has started',
+        text: self.eliminated ? 'You can watch while the others play.' : 'Your teacher will open the vote.',
+        photoButton: true,
+      });
     } else if (phase === 'voting') {
       const heroTitle = state.inRunoff ? 'Runoff vote' : 'Vote';
       if (self.eliminated) {
         setHero('orange', title, heroTitle, 'You are out of the game');
-        showWait({ avatar: avatarHtml(self), title: 'You are out', text: 'You can watch while the others vote.', progress: pct() });
+        showWait({ avatar: avatarHtml(self), title: killedSelf ? 'You were killed' : 'You are out', text: 'You can watch while the others vote.', progress: pct(), photoButton: true });
       } else if (state.myVote) {
         setHero('orange', title, heroTitle, 'Your vote is in');
         showWait({
@@ -256,6 +275,13 @@
     watcher = api.watchGame({ code: session.code, secret: session.secret, presenceKey: session.playerId, photo: myPhoto }, {
       onState(next) {
         state = next;
+        view();
+      },
+      onVotes(count) {
+        if (!state) return;
+        state = { ...state, voteCount: count };
+        // Mens eleven velger, tegner vi ikke listen på nytt (et trykk kan gå tapt).
+        if (!$('screen-vote').hidden) return;
         view();
       },
       onPhotos(next) {
@@ -331,6 +357,7 @@
   }
 
   $('photo-btn').addEventListener('click', () => $('photo-input').click());
+  $('wait-photo-btn').addEventListener('click', () => $('photo-input').click());
   $('photo-input').addEventListener('change', async (event) => {
     const file = event.target.files && event.target.files[0];
     event.target.value = '';
@@ -340,6 +367,12 @@
       savePhoto(myPhoto);
       showPhotoPreview();
       if (watcher) watcher.setPhoto(myPhoto);
+      // Bytt avataren med en gang, uten å vente på at Realtime sender bildet tilbake.
+      if (session && session.playerId) {
+        photos = { ...photos, [session.playerId]: myPhoto };
+        lastKey = '';
+        view();
+      }
     } catch (error) {
       toast(error.message);
     }
@@ -368,9 +401,18 @@
   $('vote-btn').addEventListener('click', async () => {
     if (!selected) return;
     $('vote-btn').disabled = true;
+    // Vis «Vote sent» med en gang, uten å vente på nettet. Går noe galt, ruller vi tilbake.
+    const target = selected;
+    const before = state;
+    state = { ...state, myVote: target, voteCount: state.voteCount + 1 };
+    lastKey = '';
+    view();
     try {
-      await api.rpc('imposter_cast_vote', { p_code: session.code, p_secret: session.secret, p_target: selected });
+      await api.rpc('imposter_cast_vote', { p_code: session.code, p_secret: session.secret, p_target: target });
     } catch (error) {
+      state = before;
+      lastKey = '';
+      view();
       toast(error.message);
       $('vote-btn').disabled = false;
     }
