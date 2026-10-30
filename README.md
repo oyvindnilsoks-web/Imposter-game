@@ -19,6 +19,12 @@ De som er ute (stemt ut eller drept) får en lenke til Glosemester og kan jobbe 
 
 **Roller på egen skjerm:** når du har lagret impostorene, kan hver spiller holde inne knappen «Hold to see your role» nederst på skjermen. Så lenge knappen holdes inne, vises «You are CREW» eller «You are an IMPOSTOR» (med de andre impostorene). Slipper man, forsvinner det. Impostorene ser bare hverandre, og ingen roller vises noe sted på skjermen ellers.
 
+**Oppgaver og felles pott:** de som er ute (når som helst mens spillet går), og crew som fortsatt er med (bare under natten), kan trykke **Earn points for the team** og løse korte engelskoppgaver (velg riktig ord, fyll inn, sett ordene i rekkefølge). Hvert riktig svar gir 1 poeng til en felles pott som alle ser (også på tavla). Impostorer som er med har ingen oppgaver, og impostorer som er ute får oppgaver, men svarene deres teller ikke. Ingen kan se hvem som bidrar. Hver spiller kan maks gi 6 poeng per runde. Potten har to nivåer, som skalerer med antall spillere (1,5 og 3,5 poeng per spiller):
+1. **🔎 Clue:** én tilfeldig crew-spiller som er med, vises som «Crew» for alle.
+2. **🛡️ Shield:** neste drap på natten feiler, én gang. Alle får vite at skjoldet reddet noen.
+
+Oppgavene (A1–A2) ligger i `imposter_tasks` i databasen, helt nederst i `supabase/schema.sql`, og fasiten sendes aldri til nettleseren. Du kan legge til flere oppgaver der.
+
 **Ny runde:** når spillet er slutt, trykker læreren **New round, same players**. Alle går tilbake til lobbyen med de samme spillerne (nye kan også bli med), og læreren trykker Start og velger nye impostorer. **Create new game** lager et helt nytt spill med ny kode.
 
 **Natten:** når impostorene er lagret, kan læreren trykke **Start the night** (velg tid: 30 s til 2 min). Tavla og de andre spillerne ser bare «Night falls». Impostorene som fortsatt er med får en egen skjerm der de velger hvem som skal bort (bare crew som er med kan velges). Hver impostor ser hvem lagkameratene har valgt, og kan ombestemme seg til tiden er ute. **Flertallet bestemmer:** mer enn halvparten av impostorene må velge samme spiller, ellers blir ingen drept. Natten slutter med en gang alle har valgt og flertallet er enig, når tiden går ut, eller når læreren trykker **End the night now**. Om morgenen ser alle hvem som er drept («Nobody was killed last night» hvis ingen). Drapet teller som en utkastelse og kan avgjøre spillet. **Someone was killed** finnes fortsatt, for de som spiller natten uten telefoner.
