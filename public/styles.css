@@ -745,3 +745,25 @@ body.has-peek .sheet { padding-bottom: 104px; }
   .night-banner .avatar { animation: night-glow 3s ease-in-out infinite; }
 }
 @keyframes night-glow { 50% { box-shadow: 0 0 0 10px rgba(246, 195, 111, 0.25); } }
+
+/* Det felles potten */
+.pot { margin: 0 0 14px; padding: 12px 14px; border-radius: 16px; background: var(--card); border: 2px solid var(--line); }
+.pot-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; }
+.pot-head span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.pot-track { position: relative; height: 12px; margin: 10px 0 24px; border-radius: 99px; background: #fff; border: 1px solid var(--line); }
+.pot-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--mustard), var(--orange)); transition: width 0.6s ease; }
+.pot-mark { position: absolute; top: 16px; transform: translateX(-50%); font-size: 18px; filter: grayscale(1); opacity: 0.5; }
+.pot-mark.on { filter: none; opacity: 1; }
+.pot-next { font-size: 13px; color: var(--muted); }
+.pill.ok { background: #dcebd0; color: var(--olive-dark); }
+.task-btn-wrap { margin-top: 14px; }
+.task-prompt { font-size: 22px; line-height: 1.3; margin: 8px 0 16px; }
+.task-built { display: flex; flex-wrap: wrap; gap: 8px; min-height: 52px; padding: 10px; margin-bottom: 12px; border-radius: 14px; border: 2px dashed var(--line); background: #fff; }
+.chip { font: inherit; font-size: 17px; padding: 8px 14px; border-radius: 12px; border: 2px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+.chip:active { transform: scale(0.97); }
+.task-bank { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.task-feedback { min-height: 28px; margin: 12px 0; font-size: 18px; font-weight: 600; text-align: center; }
+.task-feedback.good { color: var(--ok); }
+.task-feedback.bad { color: var(--danger); }
+.choice.right { border-color: var(--ok); background: #e6f2dc; }
+.choice.wrong { border-color: var(--danger); background: #f6d6cc; }

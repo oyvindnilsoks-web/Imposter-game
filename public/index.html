@@ -29,6 +29,7 @@
 
     <main class="sheet">
       <div class="notice" id="kill-note" hidden></div>
+      <div class="pot" id="pot" hidden></div>
       <!-- Bli med -->
       <section id="screen-join">
         <h2>Hi!</h2>
@@ -79,6 +80,18 @@
         <ul class="list grid" id="night-list"></ul>
       </section>
 
+      <!-- Oppgaver: gir poeng til det felles potten -->
+      <section id="screen-task" hidden>
+        <div class="pot" id="task-pot"></div>
+        <h2 class="task-prompt" id="task-prompt"></h2>
+        <div id="task-built" class="task-built" hidden></div>
+        <div id="task-options" class="list grid"></div>
+        <button class="btn" id="task-check" hidden disabled>Check</button>
+        <div class="task-feedback" id="task-feedback"></div>
+        <button class="btn orange" id="task-next" hidden>Next task</button>
+        <button class="btn secondary" id="task-back">Back</button>
+      </section>
+
       <!-- Resultat -->
       <section id="screen-result" hidden>
         <div class="status" id="result-status">
@@ -89,6 +102,7 @@
         <div class="section-title">Votes <span id="result-round"></span></div>
         <ul class="list grid" id="result-list"></ul>
       </section>
+      <div class="task-btn-wrap"><button class="btn orange" id="task-btn" hidden>📝 Earn points for the team</button></div>
       <!-- Til de som er ute: noe nyttig å gjøre mens de andre blir ferdige. -->
       <div class="out-note" id="out-note" hidden>
         <strong>You are out, but you can keep learning.</strong>

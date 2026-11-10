@@ -24,6 +24,8 @@ const PUBLIC_FUNCTIONS = new Set([
   'imposter_close_vote',
   'imposter_end_game',
   'imposter_new_round',
+  'imposter_next_task',
+  'imposter_answer_task',
   'imposter_get_state',
 ]);
 

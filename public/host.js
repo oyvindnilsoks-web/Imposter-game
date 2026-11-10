@@ -116,6 +116,7 @@
       pill = '<span class="pill soft">Offline</span>';
     }
     if (impostor) pill += '<span class="pill imp">🎭 Impostor</span>';
+    else if (!player.eliminated && (state.clueIds || []).includes(player.id)) pill += '<span class="pill ok">✅ Crew</span>';
 
     const inner = `${bar}
       <div class="num">${String(index + 1).padStart(2, '0')}</div>
@@ -150,8 +151,17 @@
         else fx.reveal({ avatars: ['🤝'], title: 'Tie', text: 'Nobody was voted out' });
       });
     }
+    const pot = state.pot;
+    if (pot && pot.level >= 1) {
+      const clue = state.players.find((player) => (state.clueIds || [])[0] === player.id);
+      once(`level1-${state.code}`, () => fx.banner(clue ? `🔎 Clue! ${clue.name} is crew.` : '🔎 Clue unlocked'));
+    }
+    if (pot && pot.level >= 2) once(`level2-${state.code}`, () => fx.banner('🛡️ Shield ready. The next kill will fail.'));
+    if (['ready', 'result'].includes(phase) && state.nightResult && state.nightResult.shielded) {
+      once(`shield-${state.code}-${state.nightResult.night}`, () => fx.banner('🛡️ The shield saved someone!'));
+    }
     if (phase === 'night') once(`night-${state.code}-${state.night.no}`, () => fx.banner('🌙 Night falls'));
-    if (['ready', 'result'].includes(phase) && state.nightResult && !state.nightResult.killedId) {
+    if (['ready', 'result'].includes(phase) && state.nightResult && !state.nightResult.killedId && !state.nightResult.shielded) {
       once(`morning-${state.code}-${state.nightResult.night}`, () => fx.banner('☀️ Morning. Nobody was killed.'));
     }
     if (phase === 'over') once(`over-${state.code}`, () => fx.confetti({ dark: state.winner !== 'crew' }));
@@ -196,13 +206,14 @@
     // Hvem som er drept før denne avstemmingen
     const killed = state.players.filter((player) => (state.killedIds || []).includes(player.id));
     const quietNight = Boolean(state.nightResult && !state.nightResult.killedId);
+    const quietText = state.nightResult && state.nightResult.shielded ? '🛡️ The shield saved someone last night.' : '☀️ Nobody was killed last night.';
     $('kill-note').hidden = !(killed.length || quietNight) || !['ready', 'voting', 'result'].includes(phase);
     if (killed.length) {
       const names = killed.map((player) => player.name);
       const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
-      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.${quietNight ? ' ☀️ Nobody was killed last night.' : ''}`;
+      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.${quietNight ? ` ${quietText}` : ''}`;
     } else if (quietNight) {
-      $('kill-note').textContent = '☀️ Nobody was killed last night.';
+      $('kill-note').textContent = quietText;
     }
     playEffects(killed);
 
@@ -211,6 +222,11 @@
     $('qr-img').innerHTML = info.qr;
     $('qr-code').textContent = info.code;
     $('qr-url').textContent = info.joinUrl;
+
+    // Det felles potten
+    const showPot = Boolean(state.pot) && ['ready', 'night', 'voting', 'result'].includes(phase);
+    $('pot').hidden = !showPot;
+    $('pot').innerHTML = showPot ? fx.potHtml(state.pot) : '';
 
     // Resultat og vinner
     $('result-banner').hidden = phase !== 'result' && phase !== 'over' && phase !== 'night';

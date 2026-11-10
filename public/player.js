@@ -4,7 +4,7 @@
   const api = window.ImposterApi;
   const fx = window.ImposterFx;
   const $ = (id) => document.getElementById(id);
-  const SCREENS = ['join', 'wait', 'vote', 'night', 'result'];
+  const SCREENS = ['join', 'wait', 'vote', 'night', 'task', 'result'];
 
   let state = null; // tilstanden fra databasen
   let photos = {}; // spillerens id -> bilde, delt live og aldri lagret
@@ -13,6 +13,11 @@
   let nightMax = 1; // lengste gjenstående tid vi har sett i natten, til fremdriftsstolpen
   let nightNo = 0;
   let series = 0;
+  let taskOpen = false; // oppgaveskjermen er åpen
+  let task = null; // oppgaven som vises
+  let built = []; // ordene eleven har trykket inn (setninger)
+  let answering = false;
+  let usedIndexes = []; // hvilke ordknapper som er brukt, i samme rekkefølge som built
   let watcher = null;
   let lastKey = '';
   const seen = new Set();
@@ -97,6 +102,7 @@
     return true;
   }
 
+  const isClue = (player) => Boolean(state.clueIds && state.clueIds.includes(player.id) && !player.eliminated);
   const isImpostor = (player) => Boolean(state.impostorIds && state.impostorIds.includes(player.id));
 
   function playerRow(player, index, extra = {}) {
@@ -106,7 +112,7 @@
     if (player.eliminated) classes.push('out');
     if (isImpostor(player)) classes.push('imp');
     if (!player.connected && state.phase === 'lobby') classes.push('offline');
-    const pill = extra.pill || (isImpostor(player) ? '<span class="pill imp">🎭 Impostor</span>' : '');
+    const pill = extra.pill || (isImpostor(player) ? '<span class="pill imp">🎭 Impostor</span>' : isClue(player) ? '<span class="pill ok">✅ Crew</span>' : '');
     return `<li class="${classes.join(' ')}" style="--i:${index}">
       ${extra.bar ? `<div class="bar" style="width:${extra.bar}%"></div>` : ''}
       <div class="avatar">${avatarHtml(player)}</div>
@@ -153,6 +159,7 @@
       .map((player, index) => `<li><button class="row choice${isFresh('vote', player.id) ? ' fresh' : ''}${player.id === selected ? ' selected' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
         <div class="avatar">${avatarHtml(player)}</div>
         <div class="name">${esc(player.name)}</div>
+        ${isClue(player) ? '<span class="pill ok">✅ Crew</span>' : ''}
         <span class="radio"></span>
       </button></li>`)
       .join('');
@@ -253,8 +260,17 @@
         title: player.id === self.id ? 'You were killed' : `${player.name} was killed`,
       }));
     }
+    const pot = state.pot;
+    if (pot && pot.level >= 1) {
+      const clue = state.players.find((player) => (state.clueIds || [])[0] === player.id);
+      once(`level1-${state.code}`, () => fx.banner(clue ? `🔎 Clue! ${clue.name} is crew.` : '🔎 Clue unlocked'));
+    }
+    if (pot && pot.level >= 2) once(`level2-${state.code}`, () => fx.banner('🛡️ Shield ready. The next kill will fail.'));
+    if (['ready', 'result'].includes(phase) && state.nightResult && state.nightResult.shielded) {
+      once(`shield-${state.code}-${state.nightResult.night}`, () => fx.banner('🛡️ The shield saved someone!'));
+    }
     if (phase === 'night') once(`night-${state.code}-${state.night.no}`, () => fx.banner('🌙 Night falls'));
-    if (['ready', 'result'].includes(phase) && state.nightResult && !state.nightResult.killedId) {
+    if (['ready', 'result'].includes(phase) && state.nightResult && !state.nightResult.killedId && !state.nightResult.shielded) {
       once(`morning-${state.code}-${state.nightResult.night}`, () => fx.banner('☀️ Morning. Nobody was killed.'));
     }
     if (phase === 'voting') {
@@ -290,13 +306,14 @@
     // Hvem som er drept før denne avstemmingen
     const killed = state.players.filter((player) => (state.killedIds || []).includes(player.id));
     const quietNight = Boolean(state.nightResult && !state.nightResult.killedId);
+    const quietText = state.nightResult && state.nightResult.shielded ? '🛡️ The shield saved someone last night.' : '☀️ Nobody was killed last night.';
     $('kill-note').hidden = !(killed.length || quietNight) || !['ready', 'voting', 'result'].includes(phase);
     if (killed.length) {
       const names = killed.map((player) => player.name);
       const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
-      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.${quietNight ? ' ☀️ Nobody was killed last night.' : ''}`;
+      $('kill-note').textContent = `💀 ${who} ${names.length > 1 ? 'were' : 'was'} killed.${quietNight ? ` ${quietText}` : ''}`;
     } else if (quietNight) {
-      $('kill-note').textContent = '☀️ Nobody was killed last night.';
+      $('kill-note').textContent = quietText;
     }
     playEffects(self, killed);
     // De som er ute får en lenke til Glosemester, mens spillet pågår
@@ -367,6 +384,16 @@
     } else {
       setHero('', `Game ${state.code}`, 'The game is over', 'Thanks for playing!');
       showWait({ avatar: '🎉', title: 'Thanks for playing!', text: 'Your teacher has ended the game.' });
+    }
+    // Det felles potten og oppgavene
+    const showPot = Boolean(state.pot) && ['ready', 'night', 'voting', 'result'].includes(phase);
+    $('pot').hidden = !showPot || taskOpen;
+    $('pot').innerHTML = showPot ? fx.potHtml(state.pot) : '';
+    if (taskOpen && !state.canTask) closeTask();
+    $('task-btn').hidden = !state.canTask || taskOpen;
+    if (taskOpen) {
+      $('task-pot').innerHTML = fx.potHtml(state.pot);
+      show('task');
     }
     effectsReady = true;
     for (const key of pendingSeen) seen.add(key);
@@ -476,6 +503,112 @@
     $('photo-preview').innerHTML = myPhoto ? `<img src="${esc(myPhoto)}" alt="Your photo">` : '📷';
     $('photo-btn').classList.toggle('has-photo', Boolean(myPhoto));
   }
+
+  // ---- Oppgaver
+  function closeTask() {
+    taskOpen = false;
+    task = null;
+    lastKey = '';
+    view();
+  }
+
+  async function loadTask() {
+    answering = false;
+    built = [];
+    $('task-feedback').textContent = '';
+    $('task-feedback').className = 'task-feedback';
+    $('task-next').hidden = true;
+    $('task-prompt').textContent = 'Loading...';
+    // Fjern det forrige svaret med en gang, så man ikke kan trykke på en gammel oppgave mens neste hentes.
+    $('task-options').innerHTML = '';
+    $('task-built').hidden = true;
+    $('task-check').hidden = true;
+    try {
+      task = await api.rpc('imposter_next_task', { p_code: session.code, p_secret: session.secret });
+    } catch (error) {
+      toast(error.message);
+      return closeTask();
+    }
+    drawTask();
+  }
+
+  function drawTask() {
+    $('task-prompt').textContent = task.prompt;
+    const order = task.kind === 'order';
+    $('task-built').hidden = !order;
+    $('task-check').hidden = !order;
+    if (order) {
+      $('task-built').innerHTML = built.map((word, index) => `<button type="button" class="chip" data-built="${index}">${esc(word)}</button>`).join('');
+      $('task-options').className = 'task-bank';
+      $('task-options').innerHTML = task.options
+        .map((word, index) => `<button type="button" class="chip" data-index="${index}" ${usedIndexes.includes(index) ? 'hidden' : ''}>${esc(word)}</button>`)
+        .join('');
+      $('task-check').disabled = built.length !== task.options.length || answering;
+    } else {
+      $('task-options').className = 'list grid';
+      $('task-options').innerHTML = task.options.map((option) => `<button type="button" class="row choice" data-option="${esc(option)}"><div class="name">${esc(option)}</div></button>`).join('');
+    }
+  }
+
+  async function sendAnswer(text) {
+    if (answering || !task) return;
+    answering = true;
+    $('task-check').disabled = true;
+    try {
+      const result = await api.rpc('imposter_answer_task', { p_code: session.code, p_secret: session.secret, p_task: task.id, p_answer: text });
+      const box = $('task-feedback');
+      if (result.correct) {
+        box.className = 'task-feedback good';
+        box.textContent = result.capped ? '✅ Right! You have given the most points you can this round.' : '✅ Right!';
+      } else {
+        box.className = 'task-feedback bad';
+        box.textContent = `❌ The answer is: ${result.answer}`;
+      }
+      for (const el of $('task-options').querySelectorAll('.choice')) {
+        el.disabled = true;
+        if (el.dataset.option === result.answer) el.classList.add('right');
+        else if (el.dataset.option === text) el.classList.add('wrong');
+      }
+      $('task-next').hidden = false;
+      if (watcher) watcher.refresh();
+    } catch (error) {
+      toast(error.message);
+      answering = false;
+      if (/not open|Tasks are open/i.test(error.message)) closeTask();
+    }
+  }
+
+  $('task-btn').addEventListener('click', () => {
+    taskOpen = true;
+    usedIndexes = [];
+    lastKey = '';
+    view();
+    loadTask();
+  });
+  $('task-back').addEventListener('click', closeTask);
+  $('task-next').addEventListener('click', () => { usedIndexes = []; loadTask(); });
+  $('task-options').addEventListener('click', (event) => {
+    if (!task || answering) return;
+    const choice = event.target.closest('[data-option]');
+    if (choice) return void sendAnswer(choice.dataset.option);
+    const word = event.target.closest('[data-index]');
+    if (word) {
+      const index = Number(word.dataset.index);
+      usedIndexes.push(index);
+      built.push(task.options[index]);
+      drawTask();
+    }
+  });
+  $('task-built').addEventListener('click', (event) => {
+    if (!task || answering) return;
+    const chip = event.target.closest('[data-built]');
+    if (!chip) return;
+    const position = Number(chip.dataset.built);
+    built.splice(position, 1);
+    usedIndexes.splice(position, 1);
+    drawTask();
+  });
+  $('task-check').addEventListener('click', () => sendAnswer(built.join(' ')));
 
   $('photo-btn').addEventListener('click', () => $('photo-input').click());
   $('wait-photo-btn').addEventListener('click', () => $('photo-input').click());

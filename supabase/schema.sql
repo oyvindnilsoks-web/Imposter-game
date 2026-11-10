@@ -83,6 +83,35 @@ create table if not exists imposter_night_picks (
   primary key (game_code, impostor_id)
 );
 
+-- The team pot: crew and players who are out solve English tasks, and the pot unlocks help.
+alter table imposter_games add column if not exists pot integer not null default 0;
+alter table imposter_games add column if not exists pot_level integer not null default 0;
+alter table imposter_games add column if not exists shield_ready boolean not null default false;
+alter table imposter_games add column if not exists clue_ids uuid[];
+alter table imposter_players add column if not exists current_task integer;
+
+-- The tasks. The answers stay here: the browser only gets the question and the choices.
+create table if not exists imposter_tasks (
+  id serial primary key,
+  kind text not null check (kind in ('choice', 'order')),
+  prompt text not null,
+  options text[] not null,
+  answer text not null,
+  unique (prompt, answer)
+);
+
+create table if not exists imposter_task_log (
+  id bigserial primary key,
+  game_code text not null references imposter_games (code) on delete cascade,
+  player_id uuid not null references imposter_players (id) on delete cascade,
+  task_id integer not null references imposter_tasks (id) on delete cascade,
+  round integer not null,
+  correct boolean not null,
+  counted boolean not null,
+  answered_at timestamptz not null default now()
+);
+create index if not exists imposter_task_log_player_idx on imposter_task_log (game_code, player_id, round);
+
 -- ---------------------------------------------------------------------------
 -- Security
 -- ---------------------------------------------------------------------------
@@ -92,8 +121,11 @@ alter table imposter_secrets enable row level security;
 alter table imposter_players enable row level security;
 alter table imposter_votes enable row level security;
 alter table imposter_night_picks enable row level security;
+alter table imposter_tasks enable row level security;
+alter table imposter_task_log enable row level security;
 
-revoke all on imposter_games, imposter_secrets, imposter_players, imposter_votes, imposter_night_picks
+revoke all on imposter_games, imposter_secrets, imposter_players, imposter_votes, imposter_night_picks,
+  imposter_tasks, imposter_task_log
   from anon, authenticated;
 
 grant select on imposter_games to anon, authenticated;
@@ -522,6 +554,7 @@ declare
   v_alive integer;
   v_target uuid;
   v_back text;
+  v_shielded boolean := false;
 begin
   select * into v_game from imposter_games where code = p_code;
   select count(*) into v_alive
@@ -536,13 +569,20 @@ begin
   having count(*) * 2 > v_alive
    limit 1;
 
+  -- A shield from the pot stops the kill, once.
+  if v_target is not null and v_game.shield_ready then
+    v_target := null;
+    v_shielded := true;
+  end if;
+
   v_back := case when v_game.round > 0 then 'result' else 'ready' end;
   delete from imposter_night_picks where game_code = v_game.code;
 
   update imposter_games
      set phase = v_back,
          night_ends_at = null,
-         night_result = jsonb_build_object('night', v_game.night_no, 'killedId', v_target),
+         night_result = jsonb_build_object('night', v_game.night_no, 'killedId', v_target, 'shielded', v_shielded),
+         shield_ready = shield_ready and not v_shielded,
          updated_at = now()
    where code = v_game.code;
 
@@ -756,7 +796,8 @@ begin
 
   delete from imposter_votes where game_code = v_game.code;
   delete from imposter_night_picks where game_code = v_game.code;
-  update imposter_players set eliminated = false, is_impostor = false where game_code = v_game.code;
+  delete from imposter_task_log where game_code = v_game.code;
+  update imposter_players set eliminated = false, is_impostor = false, current_task = null where game_code = v_game.code;
   update imposter_games
      set phase = 'lobby',
          round = 0,
@@ -769,6 +810,10 @@ begin
          vote_count = 0,
          night_ends_at = null,
          night_result = null,
+         pot = 0,
+         pot_level = 0,
+         shield_ready = false,
+         clue_ids = null,
          series = series + 1,
          updated_at = now()
    where code = v_game.code;
@@ -787,6 +832,155 @@ declare
 begin
   update imposter_games set phase = 'ended', result = null, updated_at = now()
    where code = v_game.code;
+end;
+$$;
+
+-- Who may solve tasks: players who are out (any time the game is on), and crew still in during the night.
+create or replace function imposter_can_task(p_phase text, p_eliminated boolean, p_impostor boolean)
+returns boolean
+language sql
+immutable
+as $$
+  select case
+    when p_eliminated then p_phase in ('ready', 'night', 'voting', 'result')
+    else p_phase = 'night' and not p_impostor
+  end;
+$$;
+
+-- Points the pot needs for level 1 and level 2, for a given number of players.
+create or replace function imposter_pot_goals(p_players integer)
+returns integer[]
+language sql
+immutable
+as $$
+  select array[ceil(1.5 * p_players)::integer, ceil(3.5 * p_players)::integer];
+$$;
+
+-- Player: get the task to solve. You keep the same task until you have answered it.
+create or replace function imposter_next_task(p_code text, p_secret text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games;
+  v_me imposter_players;
+  v_task imposter_tasks;
+  v_options text[];
+  v_try integer := 0;
+begin
+  select * into v_game from imposter_games where code = upper(btrim(p_code));
+  if not found then
+    raise exception 'Game not found. Check the code.';
+  end if;
+  select * into v_me from imposter_players where game_code = v_game.code and secret = p_secret;
+  if not found or not imposter_can_task(v_game.phase, v_me.eliminated, v_me.is_impostor) then
+    raise exception 'Tasks are open at night, or when you are out.';
+  end if;
+
+  if v_me.current_task is not null then
+    select * into v_task from imposter_tasks where id = v_me.current_task;
+  end if;
+  if v_task.id is null then
+    select * into v_task from imposter_tasks t
+     where not exists (
+       select 1 from imposter_task_log l where l.player_id = v_me.id and l.task_id = t.id
+     )
+     order by random() limit 1;
+    if v_task.id is null then
+      select * into v_task from imposter_tasks order by random() limit 1;
+    end if;
+    update imposter_players set current_task = v_task.id where id = v_me.id;
+  end if;
+
+  -- Words to put in order are shuffled, and never come in the right order.
+  v_options := (select array_agg(o order by random()) from unnest(v_task.options) o);
+  if v_task.kind = 'order' then
+    while v_options = v_task.options and v_try < 10 loop
+      v_options := (select array_agg(o order by random()) from unnest(v_task.options) o);
+      v_try := v_try + 1;
+    end loop;
+  end if;
+
+  return jsonb_build_object('id', v_task.id, 'kind', v_task.kind, 'prompt', v_task.prompt, 'options', to_jsonb(v_options));
+end;
+$$;
+
+-- Player: answer the task. A right answer adds a point to the team pot, unless you are an impostor
+-- or you have reached the limit for this round. Nobody can tell which answers counted.
+create or replace function imposter_answer_task(p_code text, p_secret text, p_task integer, p_answer text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c_cap constant integer := 6;
+  v_game imposter_games;
+  v_me imposter_players;
+  v_task imposter_tasks;
+  v_correct boolean;
+  v_counted boolean;
+  v_capped boolean := false;
+  v_goals integer[];
+  v_pot integer;
+  v_level integer;
+  v_clue uuid;
+begin
+  select * into v_game from imposter_games where code = upper(btrim(p_code)) for update;
+  if not found then
+    raise exception 'Game not found. Check the code.';
+  end if;
+  select * into v_me from imposter_players where game_code = v_game.code and secret = p_secret;
+  if not found or not imposter_can_task(v_game.phase, v_me.eliminated, v_me.is_impostor) then
+    raise exception 'Tasks are open at night, or when you are out.';
+  end if;
+  if v_me.current_task is distinct from p_task then
+    raise exception 'That task is not open any more.';
+  end if;
+
+  select * into v_task from imposter_tasks where id = p_task;
+  v_correct := lower(regexp_replace(btrim(coalesce(p_answer, '')), '\s+', ' ', 'g')) = lower(v_task.answer);
+  v_counted := v_correct and not v_me.is_impostor;
+  if v_counted and (
+    select count(*) from imposter_task_log
+     where game_code = v_game.code and player_id = v_me.id and round = v_game.round and counted
+  ) >= c_cap then
+    v_counted := false;
+    v_capped := true;
+  end if;
+
+  insert into imposter_task_log (game_code, player_id, task_id, round, correct, counted)
+  values (v_game.code, v_me.id, v_task.id, v_game.round, v_correct, v_counted);
+  update imposter_players set current_task = null where id = v_me.id;
+
+  if v_counted then
+    v_pot := v_game.pot + 1;
+    v_level := v_game.pot_level;
+    v_goals := imposter_pot_goals((select count(*) from imposter_players where game_code = v_game.code)::integer);
+    while v_level < 2 and v_pot >= v_goals[v_level + 1] loop
+      v_level := v_level + 1;
+      if v_level = 1 then
+        -- Clue: one crew member who is still in is shown to everyone as crew.
+        select id into v_clue from imposter_players
+         where game_code = v_game.code and not eliminated and not is_impostor
+           and not (id = any(coalesce(v_game.clue_ids, '{}')))
+         order by random() limit 1;
+        if v_clue is not null then
+          v_game.clue_ids := coalesce(v_game.clue_ids, '{}') || v_clue;
+        end if;
+      else
+        v_game.shield_ready := true;
+      end if;
+    end loop;
+    update imposter_games
+       set pot = v_pot, pot_level = v_level, clue_ids = v_game.clue_ids,
+           shield_ready = v_game.shield_ready, updated_at = now()
+     where code = v_game.code;
+  end if;
+
+  return jsonb_build_object('correct', v_correct, 'answer', v_task.answer, 'capped', v_capped and not v_me.is_impostor);
 end;
 $$;
 
@@ -921,6 +1115,16 @@ begin
       else 'crew'
     end,
     'series', v_game.series,
+    'pot', case when v_game.phase in ('lobby', 'ended') then null else jsonb_build_object(
+      'points', v_game.pot,
+      'level', v_game.pot_level,
+      'goals', to_jsonb(imposter_pot_goals((select count(*) from imposter_players where game_code = v_game.code)::integer)),
+      'shield', v_game.shield_ready
+    ) end,
+    'clueIds', to_jsonb(v_game.clue_ids),
+    'canTask', case when v_me is null then false else (
+      select imposter_can_task(v_game.phase, p.eliminated, p.is_impostor) from imposter_players p where p.id = v_me
+    ) end,
     'mates', v_mates,
     'night', v_night,
     'nightPicks', v_picks,
@@ -951,6 +1155,10 @@ revoke all on function imposter_kill_player(text, text, uuid) from public;
 revoke all on function imposter_start_night(text, text, integer) from public;
 revoke all on function imposter_night_pick(text, text, uuid) from public;
 revoke all on function imposter_close_night(text, text) from public;
+revoke all on function imposter_next_task(text, text) from public;
+revoke all on function imposter_answer_task(text, text, integer, text) from public;
+revoke all on function imposter_can_task(text, boolean, boolean) from public, anon, authenticated;
+revoke all on function imposter_pot_goals(integer) from public, anon, authenticated;
 revoke all on function imposter_new_round(text, text) from public;
 revoke all on function imposter_get_state(text, text, text) from public;
 
@@ -968,3 +1176,91 @@ grant execute on function imposter_start_night(text, text, integer) to anon, aut
 grant execute on function imposter_night_pick(text, text, uuid) to anon, authenticated;
 grant execute on function imposter_close_night(text, text) to anon, authenticated;
 grant execute on function imposter_new_round(text, text) to anon, authenticated;
+grant execute on function imposter_next_task(text, text) to anon, authenticated;
+grant execute on function imposter_answer_task(text, text, integer, text) to anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Tasks (A1-A2). Safe to run again: tasks that already exist are skipped.
+-- ---------------------------------------------------------------------------
+
+insert into imposter_tasks (kind, prompt, options, answer) values
+  ('choice', 'Which word means the opposite of big?', array['small', 'tall', 'long', 'old'], 'small'),
+  ('choice', 'Which word means the opposite of hot?', array['cold', 'warm', 'wet', 'dry'], 'cold'),
+  ('choice', 'Which word means the opposite of happy?', array['sad', 'glad', 'kind', 'tired'], 'sad'),
+  ('choice', 'Which word means the opposite of fast?', array['slow', 'quick', 'late', 'loud'], 'slow'),
+  ('choice', 'Which word means the opposite of new?', array['old', 'young', 'good', 'nice'], 'old'),
+  ('choice', 'Which word means a place where you buy food?', array['shop', 'school', 'park', 'bank'], 'shop'),
+  ('choice', 'Which word means the animal that says ''meow''?', array['cat', 'dog', 'cow', 'pig'], 'cat'),
+  ('choice', 'Which word means the color of the sky on a sunny day?', array['blue', 'green', 'red', 'black'], 'blue'),
+  ('choice', 'Which word means the day after Monday?', array['Tuesday', 'Sunday', 'Friday', 'Thursday'], 'Tuesday'),
+  ('choice', 'Which word means the meal in the morning?', array['breakfast', 'dinner', 'supper', 'lunch'], 'breakfast'),
+  ('choice', 'Which word means a person who teaches you?', array['teacher', 'doctor', 'driver', 'farmer'], 'teacher'),
+  ('choice', 'Which word means your mother''s sister?', array['aunt', 'uncle', 'cousin', 'niece'], 'aunt'),
+  ('choice', 'Which word means 12 months?', array['year', 'week', 'day', 'month'], 'year'),
+  ('choice', 'Which word do you use to write? (a tool)', array['pen', 'cup', 'key', 'bag'], 'pen'),
+  ('choice', 'Which word means the season after summer?', array['autumn', 'winter', 'spring', 'holiday'], 'autumn'),
+  ('choice', 'Which word is a fruit?', array['banana', 'carrot', 'potato', 'onion'], 'banana'),
+  ('choice', 'Which word is a vegetable?', array['carrot', 'apple', 'orange', 'grape'], 'carrot'),
+  ('choice', 'Which word is a kind of weather?', array['rain', 'road', 'ring', 'rock'], 'rain'),
+  ('choice', 'Which word is a part of your body?', array['elbow', 'table', 'window', 'pencil'], 'elbow'),
+  ('choice', 'She ___ to school every day.', array['goes', 'go', 'going', 'gone'], 'goes'),
+  ('choice', 'I ___ a banana for lunch.', array['eat', 'eats', 'eating', 'eaten'], 'eat'),
+  ('choice', 'They ___ football on Saturdays.', array['play', 'plays', 'playing', 'played'], 'play'),
+  ('choice', 'He ___ a blue bike.', array['has', 'have', 'having', 'haves'], 'has'),
+  ('choice', 'We ___ at home yesterday.', array['were', 'are', 'is', 'be'], 'were'),
+  ('choice', 'There ___ three books on the table.', array['are', 'is', 'am', 'be'], 'are'),
+  ('choice', 'My brother ___ my best friend.', array['is', 'are', 'am', 'be'], 'is'),
+  ('choice', 'I ___ not like fish.', array['do', 'does', 'am', 'is'], 'do'),
+  ('choice', '___ you like pizza?', array['Do', 'Does', 'Are', 'Is'], 'Do'),
+  ('choice', 'What ___ she doing now?', array['is', 'are', 'do', 'does'], 'is'),
+  ('choice', 'This is ___ apple.', array['an', 'a', 'the', 'two'], 'an'),
+  ('choice', 'I have two ___.', array['brothers', 'brother', 'brotheres', 'brotheras'], 'brothers'),
+  ('choice', 'The cat is ___ the box.', array['in', 'at', 'on the', 'to'], 'in'),
+  ('choice', 'The book is ___ the table.', array['on', 'in', 'at', 'to'], 'on'),
+  ('choice', 'School starts ___ eight o''clock.', array['at', 'on', 'in', 'to'], 'at'),
+  ('choice', 'My birthday is ___ June.', array['in', 'on', 'at', 'to'], 'in'),
+  ('choice', 'I was born ___ Monday.', array['on', 'in', 'at', 'to'], 'on'),
+  ('choice', 'Yesterday I ___ to the cinema.', array['went', 'go', 'goes', 'gone'], 'went'),
+  ('choice', 'Last week we ___ a big cake.', array['made', 'make', 'makes', 'making'], 'made'),
+  ('choice', 'Tom is taller ___ Sam.', array['than', 'then', 'that', 'as'], 'than'),
+  ('choice', 'This is the ___ book I have ever read.', array['best', 'good', 'better', 'goodest'], 'best'),
+  ('choice', 'How ___ apples do you have?', array['many', 'much', 'lot', 'any'], 'many'),
+  ('choice', 'How ___ milk do you want?', array['much', 'many', 'lot', 'few'], 'much'),
+  ('choice', 'Which is the correct spelling?', array['friend', 'freind', 'frend', 'friand'], 'friend'),
+  ('choice', 'Which is the correct spelling?', array['because', 'becuase', 'becouse', 'becaus'], 'because'),
+  ('choice', 'Which is the correct spelling?', array['beautiful', 'beutiful', 'beautifull', 'butiful'], 'beautiful'),
+  ('choice', 'Which is the correct spelling?', array['school', 'scool', 'shcool', 'skool'], 'school'),
+  ('choice', 'Which is the correct spelling?', array['Wednesday', 'Wensday', 'Wendsday', 'Wedensday'], 'Wednesday'),
+  ('choice', 'What do you say in the morning?', array['Good morning', 'Good night', 'Goodbye', 'See you'], 'Good morning'),
+  ('choice', 'What do you say when you meet someone?', array['Nice to meet you', 'See you later', 'Good night', 'I am fine'], 'Nice to meet you'),
+  ('choice', 'What do you say when someone gives you a gift?', array['Thank you', 'You are welcome', 'Excuse me', 'I am sorry'], 'Thank you'),
+  ('choice', 'Someone asks ''How are you?''. What do you say?', array['I''m fine, thanks', 'I''m twelve', 'It''s Monday', 'Yes, please'], 'I''m fine, thanks'),
+  ('choice', 'Someone asks ''What''s your name?''. What do you say?', array['My name is Anna', 'I am from Oslo', 'I am ten', 'It''s red'], 'My name is Anna'),
+  ('choice', 'Someone asks ''Where are you from?''. What do you say?', array['I''m from Norway', 'I''m fine', 'I''m ten', 'I like it'], 'I''m from Norway'),
+  ('choice', 'Which word is a verb?', array['run', 'red', 'road', 'rich'], 'run'),
+  ('choice', 'Which word is an adjective?', array['happy', 'table', 'walk', 'quickly'], 'happy'),
+  ('choice', 'Which word is a noun?', array['window', 'open', 'slowly', 'green'], 'window'),
+  ('choice', 'Which sentence is correct?', array['She doesn''t like milk.', 'She don''t like milk.', 'She not like milk.', 'She doesn''t likes milk.'], 'She doesn''t like milk.'),
+  ('choice', 'Which sentence is correct?', array['There are many students here.', 'There is many students here.', 'There be many students here.', 'There are much students here.'], 'There are many students here.'),
+  ('choice', 'Which sentence is correct?', array['I can swim very well.', 'I can swimming very well.', 'I cans swim very well.', 'I can to swim very well.'], 'I can swim very well.'),
+  ('order', 'Put the words in the right order.', array['He', 'plays', 'football', 'after', 'school.'], 'He plays football after school.'),
+  ('order', 'Put the words in the right order.', array['I', 'like', 'to', 'read', 'books.'], 'I like to read books.'),
+  ('order', 'Put the words in the right order.', array['My', 'sister', 'has', 'a', 'red', 'bag.'], 'My sister has a red bag.'),
+  ('order', 'Put the words in the right order.', array['We', 'go', 'to', 'school', 'by', 'bus.'], 'We go to school by bus.'),
+  ('order', 'Put the words in the right order.', array['The', 'cat', 'is', 'under', 'the', 'table.'], 'The cat is under the table.'),
+  ('order', 'Put the words in the right order.', array['She', 'is', 'eating', 'an', 'apple.'], 'She is eating an apple.'),
+  ('order', 'Put the words in the right order.', array['They', 'are', 'playing', 'in', 'the', 'park.'], 'They are playing in the park.'),
+  ('order', 'Put the words in the right order.', array['I', 'have', 'two', 'brothers', 'and', 'one', 'sister.'], 'I have two brothers and one sister.'),
+  ('order', 'Put the words in the right order.', array['Do', 'you', 'like', 'ice', 'cream?'], 'Do you like ice cream?'),
+  ('order', 'Put the words in the right order.', array['What', 'is', 'your', 'name?'], 'What is your name?'),
+  ('order', 'Put the words in the right order.', array['Where', 'do', 'you', 'live?'], 'Where do you live?'),
+  ('order', 'Put the words in the right order.', array['My', 'birthday', 'is', 'in', 'June.'], 'My birthday is in June.'),
+  ('order', 'Put the words in the right order.', array['It', 'is', 'raining', 'today.'], 'It is raining today.'),
+  ('order', 'Put the words in the right order.', array['The', 'dog', 'runs', 'very', 'fast.'], 'The dog runs very fast.'),
+  ('order', 'Put the words in the right order.', array['We', 'eat', 'dinner', 'at', 'six', 'o''clock.'], 'We eat dinner at six o''clock.'),
+  ('order', 'Put the words in the right order.', array['Can', 'you', 'help', 'me,', 'please?'], 'Can you help me, please?'),
+  ('order', 'Put the words in the right order.', array['There', 'is', 'a', 'book', 'on', 'the', 'desk.'], 'There is a book on the desk.'),
+  ('order', 'Put the words in the right order.', array['He', 'does', 'not', 'like', 'fish.'], 'He does not like fish.'),
+  ('order', 'Put the words in the right order.', array['Yesterday', 'we', 'went', 'to', 'the', 'beach.'], 'Yesterday we went to the beach.'),
+  ('order', 'Put the words in the right order.', array['I', 'am', 'from', 'Norway.'], 'I am from Norway.')
+on conflict (prompt, answer) do nothing;
