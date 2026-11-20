@@ -2,6 +2,7 @@
   const STORE_KEY = 'imposter-host';
   const api = window.ImposterApi;
   const fx = window.ImposterFx;
+  const snd = window.ImposterSound;
   const $ = (id) => document.getElementById(id);
 
   let state = null;
@@ -11,6 +12,8 @@
   let lastKey = '';
   let nightEnd = 0;
   let series = 0;
+  let lastPhase = null; // for lyder ved fasebytte
+  let lastCount = 0;
   let nightNo = 0;
   let closing = false;
   let picker = { open: false, shown: false, random: false, draft: new Set() }; // impostor-dialogen, skjult til læreren trykker Show
@@ -140,12 +143,13 @@
     const byId = new Map(state.players.map((player) => [player.id, player]));
 
     for (const player of killed) {
-      once(`kill-${state.code}-${player.id}`, () => fx.kill({ avatar: avatarHtml(player), title: `${player.name} was killed` }));
+      once(`kill-${state.code}-${player.id}`, () => snd.sfx('kill') || fx.kill({ avatar: avatarHtml(player), title: `${player.name} was killed` }));
     }
     if ((phase === 'result' || phase === 'over') && result) {
       once(`result-${state.code}-${result.round}`, () => {
         const out = result.eliminatedId ? byId.get(result.eliminatedId) : null;
         const tied = state.players.filter((player) => (result.runoffIds || []).includes(player.id) && !player.eliminated);
+        snd.sfx(out ? 'out' : 'tie');
         if (out) fx.reveal({ avatars: [avatarHtml(out)], title: `${out.name} is out!`, text: `Got the most votes (${result.counts[out.id]})` });
         else if (tied.length >= 2) fx.reveal({ avatars: tied.map((player) => avatarHtml(player)), title: 'Tie!', text: 'A runoff vote is next' });
         else fx.reveal({ avatars: ['🤝'], title: 'Tie', text: 'Nobody was voted out' });
@@ -154,17 +158,17 @@
     const pot = state.pot;
     if (pot && pot.level >= 1) {
       const clue = state.players.find((player) => (state.clueIds || [])[0] === player.id);
-      once(`level1-${state.code}`, () => fx.banner(clue ? `🔎 Clue! ${clue.name} is crew.` : '🔎 Clue unlocked'));
+      once(`level1-${state.code}`, () => snd.sfx('clue') || fx.banner(clue ? `🔎 Clue! ${clue.name} is crew.` : '🔎 Clue unlocked'));
     }
-    if (pot && pot.level >= 2) once(`level2-${state.code}`, () => fx.banner('🛡️ Shield ready. The next kill will fail.'));
+    if (pot && pot.level >= 2) once(`level2-${state.code}`, () => snd.sfx('level') || fx.banner('🛡️ Shield ready. The next kill will fail.'));
     if (['ready', 'result'].includes(phase) && state.nightResult && state.nightResult.shielded) {
-      once(`shield-${state.code}-${state.nightResult.night}`, () => fx.banner('🛡️ The shield saved someone!'));
+      once(`shield-${state.code}-${state.nightResult.night}`, () => snd.sfx('shield') || fx.banner('🛡️ The shield saved someone!'));
     }
-    if (phase === 'night') once(`night-${state.code}-${state.night.no}`, () => fx.banner('🌙 Night falls'));
+    if (phase === 'night') once(`night-${state.code}-${state.night.no}`, () => snd.sfx('night') || fx.banner('🌙 Night falls'));
     if (['ready', 'result'].includes(phase) && state.nightResult && !state.nightResult.killedId && !state.nightResult.shielded) {
-      once(`morning-${state.code}-${state.nightResult.night}`, () => fx.banner('☀️ Morning. Nobody was killed.'));
+      once(`morning-${state.code}-${state.nightResult.night}`, () => snd.sfx('morning') || fx.banner('☀️ Morning. Nobody was killed.'));
     }
-    if (phase === 'over') once(`over-${state.code}`, () => fx.confetti({ dark: state.winner !== 'crew' }));
+    if (phase === 'over') once(`over-${state.code}`, () => snd.sfx(state.winner === 'crew' ? 'win' : 'lose') || fx.confetti({ dark: state.winner !== 'crew' }));
   }
 
   function render() {
@@ -216,6 +220,16 @@
       $('kill-note').textContent = quietText;
     }
     playEffects(killed);
+
+    // Musikk følger fasen. Lyder ved fasebytte spilles bare live, ikke ved omlasting.
+    snd.setMood({ lobby: 'day', ready: 'day', result: 'day', night: 'night', voting: 'vote', over: state.winner === 'crew' ? 'win' : 'lose' }[phase] || null);
+    if (effectsReady) {
+      if (phase === 'lobby' && state.players.length > lastCount) snd.sfx('join');
+      if (lastPhase === 'lobby' && phase === 'ready') snd.sfx('start');
+      if (lastPhase !== 'voting' && phase === 'voting') snd.sfx('vote');
+    }
+    lastPhase = phase;
+    lastCount = state.players.length;
 
     // QR vises i lobbyen
     $('qr-block').hidden = phase !== 'lobby';
@@ -554,6 +568,7 @@
   });
 
   fx.setupFullscreen($('fs-btn'));
+  snd.setupButton($('snd-btn'));
   fx.keepAwake();
   showCreate();
   const saved = loadCreds();

@@ -778,3 +778,7 @@ body.has-peek .sheet { padding-bottom: 104px; }
 /* Fjern spiller (bare i lobbyen, på lærerskjermen) */
 .remove-btn { flex: none; width: 34px; height: 34px; margin-left: 8px; border: 0; border-radius: 50%; font: inherit; font-size: 15px; line-height: 1; color: var(--muted); background: #fff; cursor: pointer; }
 .remove-btn:hover, .remove-btn:focus-visible { color: #fff; background: var(--danger); }
+
+/* Lydknappen ligger til venstre for fullskjermknappen */
+#snd-btn { right: 70px; }
+@media (min-width: 700px) { #snd-btn { right: 90px; } }
