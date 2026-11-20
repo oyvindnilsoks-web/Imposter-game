@@ -33,7 +33,7 @@ function readBody(req) {
 }
 
 async function main() {
-  const { rpc } = await createLocalDatabase();
+  const { db, rpc } = await createLocalDatabase();
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -52,6 +52,17 @@ async function main() {
         return sendJson(res, 200, result);
       } catch (error) {
         return sendJson(res, 400, { code: error.code || 'P0001', message: error.message, details: null, hint: null });
+      }
+    }
+
+    // Bare for nettleser-tester: kjør SQL direkte. Er av med mindre IMPOSTER_TEST_SQL er satt.
+    if (process.env.IMPOSTER_TEST_SQL && url.pathname === '/__sql' && req.method === 'POST') {
+      try {
+        const { sql, params } = JSON.parse((await readBody(req)) || '{}');
+        const result = await db.query(sql, params || []);
+        return sendJson(res, 200, result.rows);
+      } catch (error) {
+        return sendJson(res, 400, { message: error.message });
       }
     }
 

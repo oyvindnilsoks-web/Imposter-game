@@ -13,10 +13,13 @@
   let nightMax = 1; // lengste gjenstående tid vi har sett i natten, til fremdriftsstolpen
   let nightNo = 0;
   let series = 0;
+  let lastPot = null; // potten sist, for å se at noe blir ødelagt
+  let lastOut = null; // hvem som var ute sist, for å se at noen kommer tilbake
   let taskOpen = false; // oppgaveskjermen er åpen
   let task = null; // oppgaven som vises
   let built = []; // ordene eleven har trykket inn (setninger)
   let answering = false;
+  let suspectPick = null; // crew: den du mistenker i natt (bare lokalt, sendes aldri)
   let usedIndexes = []; // hvilke ordknapper som er brukt, i samme rekkefølge som built
   let watcher = null;
   let lastKey = '';
@@ -103,6 +106,8 @@
   }
 
   const isClue = (player) => Boolean(state.clueIds && state.clueIds.includes(player.id) && !player.eliminated);
+  const isDetective = (player) => Boolean(state.detectiveIds && state.detectiveIds.includes(player.id) && !player.eliminated && !isClue(player));
+  const susPill = '<span class="pill sus">🕵️ Suspect</span>';
   const isImpostor = (player) => Boolean(state.impostorIds && state.impostorIds.includes(player.id));
 
   function playerRow(player, index, extra = {}) {
@@ -112,11 +117,11 @@
     if (player.eliminated) classes.push('out');
     if (isImpostor(player)) classes.push('imp');
     if (!player.connected && state.phase === 'lobby') classes.push('offline');
-    const pill = extra.pill || (isImpostor(player) ? '<span class="pill imp">🎭 Impostor</span>' : isClue(player) ? '<span class="pill ok">✅ Crew</span>' : '');
+    const pill = extra.pill || (isImpostor(player) ? '<span class="pill imp">🎭 Impostor</span>' : isClue(player) ? '<span class="pill ok">✅ Crew</span>' : isDetective(player) ? susPill : '');
     return `<li class="${classes.join(' ')}" style="--i:${index}">
       ${extra.bar ? `<div class="bar" style="width:${extra.bar}%"></div>` : ''}
       <div class="avatar">${avatarHtml(player)}</div>
-      <div class="name"><span class="t">${esc(player.name)}</span>${player.id === state.meId ? '<small>You</small>' : ''}</div>
+      <div class="name"><span class="t">${esc(player.name)}</span>${player.id === state.meId ? '<small>You</small>' : ''}${extra.below || ''}</div>
       ${pill}
     </li>`;
   }
@@ -137,7 +142,9 @@
     $('wait-list-wrap').hidden = !list;
     if (list) {
       $('wait-count').textContent = count || `${state.players.length} in`;
-      $('wait-list').innerHTML = state.players.map((player, index) => playerRow(player, index, { list })).join('');
+      // De som er igjen ligger øverst.
+      const ordered = [...state.players].sort((a, b) => Number(a.eliminated) - Number(b.eliminated));
+      $('wait-list').innerHTML = ordered.map((player, index) => playerRow(player, index, { list })).join('');
     }
   }
 
@@ -153,17 +160,32 @@
     $('vote-title').textContent = state.inRunoff ? 'Runoff: who is the impostor?' : 'Who is the impostor?';
     $('vote-lead').textContent = state.inRunoff
       ? 'These players had the same number of votes. Pick one.'
-      : 'You only have one vote, so choose carefully.';
+      : state.doubleRound && !self.isImpostorUnknown
+        ? 'Double vote! The crew votes count twice this round.'
+        : 'You only have one vote, so choose carefully.';
 
     $('vote-list').innerHTML = candidates
       .map((player, index) => `<li><button class="row choice${isFresh('vote', player.id) ? ' fresh' : ''}${player.id === selected ? ' selected' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
         <div class="avatar">${avatarHtml(player)}</div>
         <div class="name">${esc(player.name)}</div>
-        ${isClue(player) ? '<span class="pill ok">✅ Crew</span>' : ''}
+        ${isClue(player) ? '<span class="pill ok">✅ Crew</span>' : isDetective(player) ? susPill : ''}
         <span class="radio"></span>
       </button></li>`)
       .join('');
     $('vote-btn').disabled = !selected;
+  }
+
+  // Vote reveal (nivå 5): hvem som stemte på hvem i runden som er ferdig.
+  function votersOf(player) {
+    if (!state.votes) return '';
+    const byId = new Map(state.players.map((p) => [p.id, p]));
+    const chips = state.votes
+      .filter((vote) => vote.targetId === player.id)
+      .map((vote) => byId.get(vote.voterId))
+      .filter(Boolean)
+      .map((voter) => `<span class="voter"><span class="avatar">${avatarHtml(voter)}</span>${esc(voter.name)}</span>`)
+      .join('');
+    return chips ? `<small class="voters">${chips}</small>` : '';
   }
 
   function renderResult(self) {
@@ -200,8 +222,40 @@
         list: 'result',
         bar: (result.counts[player.id] / max) * 100,
         pill: `<span class="pill${player.id === result.eliminatedId ? ' out' : ' soft'}">${result.counts[player.id]}</span>`,
+        below: votersOf(player),
       }))
       .join('');
+  }
+
+  // Oppdrag og kort for impostorene. Bare impostorer ser natt-skjermen, så dette er privat.
+  const MISSIONS = {
+    vote_hit: 'Vote for a crew member who then gets voted out.',
+    night_kill: 'Pick the player who is killed in the night.',
+    survive: 'Stay in the game for 2 votes.',
+  };
+  const CARDS = {
+    double_kill: ['💀💀 Double kill', 'The next night kill takes two players.'],
+    break_shield: ['💥 Break shield', "Removes the crew's shield."],
+    steal: ['🕳️ Steal points', 'Takes points from the team pot.'],
+  };
+
+  function renderMission() {
+    const box = $('mission-box');
+    const mission = state.mission;
+    const card = state.card;
+    const byId = new Map(state.players.map((player) => [player.id, player]));
+    const mates = (state.mates || []).map((id) => (byId.get(id) || {}).name).filter(Boolean);
+    const team = `<div class="team-line">🎭 ${mates.length ? `Your team: ${esc(mates.join(', '))}` : 'You are the only impostor.'}</div>`;
+    box.hidden = false;
+    if (card) {
+      const [title, text] = CARDS[card] || [card, ''];
+      box.innerHTML = `<strong>🃏 Your card</strong><div class="mission-text">${esc(title)}</div><div>${esc(text)}</div><button type="button" class="btn orange" id="card-btn">Use it now</button>${team}`;
+    } else if (mission) {
+      const percent = (mission.progress / mission.goal) * 100;
+      box.innerHTML = `<strong>🎯 Your secret mission</strong><div class="mission-text">${esc(MISSIONS[mission.type] || mission.type)}</div><div class="mission-bar"><div style="width:${percent}%"></div></div><div>${mission.progress} of ${mission.goal}. Finish it to get a card.</div>${team}`;
+    } else {
+      box.innerHTML = `<strong>🎯 Your secret mission</strong><div class="mission-text">Waiting for a new mission.</div>${team}`;
+    }
   }
 
   function renderNight(self) {
@@ -210,18 +264,73 @@
     const picks = state.nightPicks || {};
     const byId = new Map(state.players.map((player) => [player.id, player]));
     const targets = state.players.filter((player) => !player.eliminated && player.id !== self.id && !mates.has(player.id));
-    $('night-list').innerHTML = targets.map((player, index) => {
-      const backers = Object.entries(picks)
-        .filter(([impostor, target]) => target === player.id && impostor !== self.id)
-        .map(([impostor]) => byId.get(impostor))
-        .filter(Boolean);
-      return `<li><button class="row choice${isFresh('night', player.id) ? ' fresh' : ''}${picks[self.id] === player.id ? ' selected' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
+
+    // Hvem har valgt hvem. De som har fått flest valg ligger øverst, ellers i den vanlige rekkefølgen.
+    const pickers = new Map(); // mål -> impostorene som har valgt det
+    for (const [impostor, target] of Object.entries(picks)) {
+      if (!pickers.has(target)) pickers.set(target, []);
+      pickers.get(target).push(impostor);
+    }
+    const votesFor = (player) => (pickers.get(player.id) || []).length;
+    const order = new Map(targets.map((player, index) => [player.id, index]));
+    const sorted = [...targets].sort((a, b) => votesFor(b) - votesFor(a) || order.get(a.id) - order.get(b.id));
+
+    // Hvor mange som må være enige: mer enn halvparten av impostorene som er med.
+    const alive = 1 + (state.mates || []).filter((id) => byId.get(id) && !byId.get(id).eliminated).length;
+    const need = Math.floor(alive / 2) + 1;
+    const top = sorted.length ? votesFor(sorted[0]) : 0;
+    const leader = top > 0 ? sorted[0] : null;
+    const status = $('night-status');
+    status.className = `night-status${top >= need ? ' agreed' : ''}`;
+    if (top >= need) status.textContent = `✅ ${leader.name} has ${top} of ${alive} votes. The night ends when everyone has chosen.`;
+    else if (top > 0) status.textContent = `No majority yet. ${need} of ${alive} must pick the same player. ${leader.name} has ${top}.`;
+    else status.textContent = 'Tap a player to suggest who to kill.';
+
+    renderMission();
+    $('night-lead').textContent = 'Tap a player. You can change your mind. If most of you pick the same player, that player is out. If you do not agree, nobody is killed.';
+
+    $('night-list').innerHTML = sorted.map((player, index) => {
+      const who = (pickers.get(player.id) || []).map((id) => (id === self.id ? { you: true } : byId.get(id))).filter(Boolean);
+      const count = who.length;
+      const chips = who.map((voter) => (voter.you
+        ? '<span class="voter you">You</span>'
+        : `<span class="voter"><span class="avatar">${avatarHtml(voter)}</span>${esc(voter.name)}</span>`)).join('');
+      const classes = ['row', 'choice'];
+      if (isFresh('night', player.id)) classes.push('fresh');
+      if (picks[self.id] === player.id) classes.push('selected');
+      if (count) classes.push('voted');
+      if (count >= need) classes.push('majority');
+      return `<li><button class="${classes.join(' ')}" style="--i:${index}" data-id="${esc(player.id)}">
         <div class="avatar">${avatarHtml(player)}</div>
-        <div class="name">${esc(player.name)}</div>
-        ${backers.length ? `<span class="backers" title="Your team picked this player">${backers.map((mate) => `<span class="avatar">${avatarHtml(mate)}</span>`).join('')}</span>` : ''}
+        <div class="name">${esc(player.name)}${count ? `<small class="voters">${chips}</small>` : ''}</div>
+        ${count ? `<span class="pill vote-count">${count} ${count === 1 ? 'vote' : 'votes'}</span>` : ''}
         <span class="radio"></span>
       </button></li>`;
     }).join('');
+    tickNight();
+  }
+
+  // Crew ser nesten den samme skjermen som impostorene om natten, så ingen kan se på en telefon hvem som er impostor.
+  // Valget til crew er bare et notat til deg selv. Det sendes aldri, og påvirker ingenting.
+  function renderNightCrew(self) {
+    show('night');
+    $('night-lead').textContent = 'Tap a player you suspect. Only you can see your pick. Earn points for the team while you wait.';
+    const status = $('night-status');
+    status.className = 'night-status';
+    status.textContent = 'This is only for you. Nobody else sees who you pick.';
+    const pot = state.pot;
+    const next = pot ? pot.goals[Math.min(pot.level, pot.goals.length - 1)] : 1;
+    const percent = pot ? Math.min(100, (pot.points / next) * 100) : 0;
+    const box = $('mission-box');
+    box.hidden = false;
+    box.innerHTML = `<strong>🎯 Your task</strong><div class="mission-text">Earn points for the team.</div><div class="mission-bar"><div style="width:${percent}%"></div></div><div>Solve English tasks to fill the pot.</div><button type="button" class="btn orange" id="crew-task-btn">Earn points</button>`;
+    const others = state.players.filter((player) => !player.eliminated && player.id !== self.id);
+    if (!others.some((player) => player.id === suspectPick)) suspectPick = null;
+    $('night-list').innerHTML = others.map((player, index) => `<li><button class="row choice${isFresh('night', player.id) ? ' fresh' : ''}${suspectPick === player.id ? ' selected' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
+      <div class="avatar">${avatarHtml(player)}</div>
+      <div class="name">${esc(player.name)}${isClue(player) ? ' <small class="voters"><span class="voter">✅ Crew</span></small>' : ''}</div>
+      <span class="radio"></span>
+    </button></li>`).join('');
     tickNight();
   }
 
@@ -261,11 +370,26 @@
       }));
     }
     const pot = state.pot;
-    if (pot && pot.level >= 1) {
-      const clue = state.players.find((player) => (state.clueIds || [])[0] === player.id);
-      once(`level1-${state.code}`, () => fx.banner(clue ? `🔎 Clue! ${clue.name} is crew.` : '🔎 Clue unlocked'));
+    const names = (ids) => (ids || []).map((id) => (byId.get(id) || {}).name).filter(Boolean).join(', ');
+    const LEVEL_TEXT = {
+      1: () => { const clue = byId.get((state.clueIds || [])[0]); return clue ? `🔎 Clue! ${clue.name} is crew.` : '🔎 Clue unlocked'; },
+      2: () => '🛡️ Shield ready. The next kill will fail.',
+      3: () => `🕵️ Detective! At least one impostor is among: ${names(state.detectiveIds)}.`,
+      4: () => '💚 Revive ready. The next crew member who goes out comes back.',
+      5: () => '🗳️ Vote reveal! Now you can see who voted for whom.',
+      6: () => '⚖️ Double vote ready. Crew votes count twice in the next vote.',
+    };
+    for (let level = 1; pot && level <= pot.level && level <= 6; level++) {
+      if (level === 3 && !state.detectiveIds) continue;
+      once(`level${level}-${state.code}`, () => fx.banner(LEVEL_TEXT[level]()));
     }
-    if (pot && pot.level >= 2) once(`level2-${state.code}`, () => fx.banner('🛡️ Shield ready. The next kill will fail.'));
+    // Noen har ødelagt noe fra potten
+    if (lastPot && pot) {
+      if (lastPot.shield && !pot.shield && !(state.nightResult && state.nightResult.shielded)) fx.banner('💥 The shield was broken!');
+      if (pot.points < lastPot.points) fx.banner('🕳️ Someone stole points from the pot!');
+    }
+    lastPot = pot ? { shield: pot.shield, points: pot.points } : null;
+    if (phase === 'voting' && state.doubleRound) once(`double-${state.code}-${state.round}`, () => fx.banner('⚖️ Double vote! Crew votes count twice.'));
     if (['ready', 'result'].includes(phase) && state.nightResult && state.nightResult.shielded) {
       once(`shield-${state.code}-${state.nightResult.night}`, () => fx.banner('🛡️ The shield saved someone!'));
     }
@@ -300,6 +424,8 @@
       series = state.series;
       played.clear();
       seen.clear();
+      lastOut = null;
+      lastPot = null;
     }
     pendingSeen = [];
 
@@ -319,6 +445,17 @@
     } else if (quietNight) {
       $('kill-note').textContent = quietText;
     }
+    // Noen er tilbake i spillet
+    const outNow = new Set(state.players.filter((player) => player.eliminated).map((player) => player.id));
+    if (effectsReady && lastOut) {
+      const back = state.players.filter((player) => lastOut.has(player.id) && !outNow.has(player.id));
+      if (back.length) {
+        fx.banner(back.some((player) => player.id === self.id)
+          ? '💚 You are back in the game!'
+          : `💚 ${back.map((player) => player.name).join(' and ')} ${back.length > 1 ? 'are' : 'is'} back!`);
+      }
+    }
+    lastOut = outNow;
     playEffects(self, killed);
     // De som er ute får en lenke til Glosemester, mens spillet pågår
     $('out-note').hidden = !(self.eliminated && ['ready', 'night', 'voting', 'result'].includes(phase));
@@ -328,7 +465,7 @@
     $('role-peek').hidden = !canPeek;
     document.body.classList.toggle('has-peek', canPeek);
     if (!canPeek) hideRole();
-    if (state.myRole) once(`roles-${state.code}`, () => fx.banner('🎭 Roles are ready. Hold the button to see yours.'));
+    if (state.myRole) once(`roles-${state.code}`, () => fx.banner('🎭 Roles are ready. Hold the button: blue = crew, red = impostor.'));
 
     if (phase === 'lobby') {
       setHero('', `Game ${state.code}`, "You're in!", `Hi, ${self.name}`);
@@ -345,6 +482,8 @@
       setHero('night', `Night ${state.night.no}`, 'Night', self.eliminated ? 'You are out of the game' : 'Stay quiet');
       if (state.myRole === 'impostor' && !self.eliminated) {
         renderNight(self);
+      } else if (state.myRole === 'crew' && !self.eliminated) {
+        renderNightCrew(self);
       } else {
         showWait({
           avatar: '🌙',
@@ -394,7 +533,7 @@
     $('pot').hidden = !showPot || taskOpen;
     $('pot').innerHTML = showPot ? fx.potHtml(state.pot) : '';
     if (taskOpen && !state.canTask) closeTask();
-    $('task-btn').hidden = !state.canTask || taskOpen;
+    $('task-btn').hidden = !state.canTask || taskOpen || !$('screen-night').hidden;
     if (taskOpen) {
       $('task-pot').innerHTML = fx.potHtml(state.pot);
       show('task');
@@ -618,19 +757,17 @@
   $('wait-photo-btn').addEventListener('click', () => $('photo-input').click());
 
   // Rollen vises bare mens knappen holdes inne, så ingen ser den over skulderen.
+  // Rollen vises bare som en liten farge mens knappen holdes inne: blå er crew, rød er impostor.
+  // Teksten er skjult for skjermlesere. Impostorene ser lagkameratene sine på natt-skjermen.
   function showRole() {
     if (!state || !state.myRole) return;
     const sheet = $('role-sheet');
-    if (state.myRole === 'impostor') {
-      const byId = new Map(state.players.map((player) => [player.id, player]));
-      const mates = (state.mates || []).map((id) => byId.get(id)).filter(Boolean);
-      const team = mates.length
-        ? `<p>Your team:</p><div class="role-team">${mates.map((player) => `<div class="role-mate"><div class="avatar">${avatarHtml(player)}</div><span>${esc(player.name)}</span></div>`).join('')}</div>`
-        : '<p>You are the only impostor.</p>';
-      sheet.innerHTML = `<div class="role-icon">🎭</div><h2>You are an IMPOSTOR</h2><p>Do not get voted out.</p>${team}`;
-    } else {
-      sheet.innerHTML = '<div class="role-icon">🧑‍🎓</div><h2>You are CREW</h2><p>Find the impostors and vote them out.</p>';
-    }
+    const byId = new Map(state.players.map((player) => [player.id, player]));
+    const mates = (state.mates || []).map((id) => (byId.get(id) || {}).name).filter(Boolean);
+    const label = state.myRole === 'impostor'
+      ? `You are an IMPOSTOR. ${mates.length ? `Your team: ${mates.join(', ')}.` : 'You are the only impostor.'}`
+      : 'You are CREW.';
+    sheet.innerHTML = `<span class="sr-only">${esc(label)}</span>`;
     sheet.className = `role-sheet ${state.myRole}`;
     sheet.hidden = false;
   }
@@ -690,10 +827,29 @@
     $('vote-btn').disabled = false;
   });
 
+  $('mission-box').addEventListener('click', async (event) => {
+    if (event.target.closest('#crew-task-btn')) return $('task-btn').click();
+    if (!event.target.closest('#card-btn')) return;
+    event.target.disabled = true;
+    try {
+      await api.rpc('imposter_use_card', { p_code: session.code, p_secret: session.secret });
+      toast('Card used.');
+    } catch (error) {
+      toast(error.message);
+    }
+    watcher.refresh();
+  });
+
   $('night-list').addEventListener('click', async (event) => {
     const button = event.target.closest('.choice');
     if (!button || !state || state.phase !== 'night') return;
     const target = button.dataset.id;
+    // Crew: bare et notat til deg selv. Ingenting sendes.
+    if (state.myRole !== 'impostor') {
+      suspectPick = target;
+      for (const el of $('night-list').querySelectorAll('.choice')) el.classList.toggle('selected', el === button);
+      return;
+    }
     const before = state;
     // Vis valget med en gang. Går noe galt, ruller vi tilbake.
     state = { ...state, nightPicks: { ...(state.nightPicks || {}), [state.meId]: target } };

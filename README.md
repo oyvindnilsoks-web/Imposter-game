@@ -17,17 +17,25 @@ Hvis noen har mistet nettet og avstemmingen står fast, trykk **Close vote now**
 
 De som er ute (stemt ut eller drept) får en lenke til Glosemester og kan jobbe med ordene mens de venter på at de andre skal bli ferdige. Lenken ligger i `public/index.html` (`#out-note`).
 
-**Roller på egen skjerm:** når du har lagret impostorene, kan hver spiller holde inne knappen «Hold to see your role» nederst på skjermen. Så lenge knappen holdes inne, vises «You are CREW» eller «You are an IMPOSTOR» (med de andre impostorene). Slipper man, forsvinner det. Impostorene ser bare hverandre, og ingen roller vises noe sted på skjermen ellers.
+**Roller på egen skjerm:** når du har lagret impostorene, kan hver spiller holde inne knappen «Hold to see your role» nederst på skjermen. Så lenge knappen holdes inne, vises en liten sirkel med bare en farge: **blå er crew, rød er impostor**. Ingen tekst, så ingen kan lese rollen over skulderen (blå og rød skilles også av dem som ikke ser forskjell på rødt og grønt). Slipper man, forsvinner den. Impostorene ser lagkameratene sine på nattskjermen.
 
-**Oppgaver og felles pott:** de som er ute (når som helst mens spillet går), og crew som fortsatt er med (bare under natten), kan trykke **Earn points for the team** og løse korte engelskoppgaver (velg riktig ord, fyll inn, sett ordene i rekkefølge). Hvert riktig svar gir 1 poeng til en felles pott som alle ser (også på tavla). Impostorer som er med har ingen oppgaver, og impostorer som er ute får oppgaver, men svarene deres teller ikke. Ingen kan se hvem som bidrar. Hver spiller kan maks gi 6 poeng per runde. Potten har to nivåer, som skalerer med antall spillere (1,5 og 3,5 poeng per spiller):
+**Oppgaver og felles pott:** de som er ute (når som helst mens spillet går), og crew som fortsatt er med (bare under natten), kan løse korte engelskoppgaver (velg riktig ord, fyll inn, sett ordene i rekkefølge). Hvert riktig svar gir 1 poeng til en felles pott som alle ser (også på tavla). Impostorer som er med har ingen oppgaver, og impostorer som er ute får oppgaver, men svarene deres teller ikke. Ingen kan se hvem som bidrar. Hver spiller kan maks gi 4 poeng per runde. Potten har seks nivåer som skalerer med antall spillere (3, 6, 10, 15, 21 og 28 poeng per spiller):
 1. **🔎 Clue:** én tilfeldig crew-spiller som er med, vises som «Crew» for alle.
-2. **🛡️ Shield:** neste drap på natten feiler, én gang. Alle får vite at skjoldet reddet noen.
+2. **🛡️ Shield:** neste drap på natten feiler, én gang.
+3. **🕵️ Detective:** en tilfeldig gruppe på ca. 20 % av spillerne (minst 3) merkes «Suspect». Minst én impostor er blant dem, men det kan være flere.
+4. **💚 Revive:** den siste crew-spilleren som gikk ut kommer tilbake. Er ingen ute, venter den på neste crew som går ut.
+5. **🗳️ Vote reveal:** etter hver avstemming ser alle hvem som stemte på hvem.
+6. **⚖️ Double vote:** i neste avstemming teller crew-stemmene dobbelt.
+
+**Oppdrag og kort for impostorene:** hver impostor får et hemmelig oppdrag som vises på nattskjermen deres: stem på en crew som blir stemt ut, velg den som blir drept om natten, eller bli i spillet i to avstemminger. Når oppdraget er klart, får impostoren et kort som kan brukes om natten: **💀💀 Double kill** (neste nattdrap tar to), **💥 Break shield** (fjerner skjoldet til crew) eller **🕳️ Steal points** (tar poeng fra potten). Så kommer et nytt oppdrag. Om natten ser crew en skjerm som ligner impostorenes (med et valg som bare er et notat til dem selv), så ingen kan se på en telefon hvem som er impostor.
 
 Oppgavene (A1–A2) ligger i `imposter_tasks` i databasen, helt nederst i `supabase/schema.sql`, og fasiten sendes aldri til nettleseren. Du kan legge til flere oppgaver der.
 
 **Ny runde:** når spillet er slutt, trykker læreren **New round, same players**. Alle går tilbake til lobbyen med de samme spillerne (nye kan også bli med), og læreren trykker Start og velger nye impostorer. **Create new game** lager et helt nytt spill med ny kode.
 
 **Natten:** når impostorene er lagret, kan læreren trykke **Start the night** (velg tid: 30 s til 2 min). Tavla og de andre spillerne ser bare «Night falls». Impostorene som fortsatt er med får en egen skjerm der de velger hvem som skal bort (bare crew som er med kan velges). Hver impostor ser hvem lagkameratene har valgt, og kan ombestemme seg til tiden er ute. **Flertallet bestemmer:** mer enn halvparten av impostorene må velge samme spiller, ellers blir ingen drept. Natten slutter med en gang alle har valgt og flertallet er enig, når tiden går ut, eller når læreren trykker **End the night now**. Om morgenen ser alle hvem som er drept («Nobody was killed last night» hvis ingen). Drapet teller som en utkastelse og kan avgjøre spillet. **Someone was killed** finnes fortsatt, for de som spiller natten uten telefoner.
+
+**Gjenopplive:** når noen er ute, vises **💚 Bring someone back** på lærerskjermen (mellom runder, og også etter at spillet er slutt). Velg spilleren som skal tilbake. Alle får et banner, og kill-meldingen om spilleren fjernes. Hvis spillet var slutt på grunn av den som var ute, fortsetter det der det var. Det går ikke under avstemming eller natt.
 
 **Lyd:** lærerskjermen (`/host`) spiller rolig bakgrunnsmusikk som skifter etter fasen (dag, natt, avstemming, seier) og lydeffekter ved viktige øyeblikk (noen blir med, start, natten faller, drap, skjold, clue, utkastelse, spillet er slutt). Alt lages i nettleseren med Web Audio, så det trengs ingen lydfiler. Elevenes telefoner er stille. Knappen øverst til høyre bytter mellom av, lavt og på, og valget huskes. Nettleseren starter lyden først etter at du har trykket på siden (for eksempel Create new game). På iPad må ringebryteren ikke stå på stille, ellers dempes lyden.
 

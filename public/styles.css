@@ -697,36 +697,25 @@ body.has-peek .sheet { padding-bottom: 104px; }
 
 .role-sheet {
   position: fixed;
-  inset: 0;
+  left: 50%;
+  bottom: 124px;
   z-index: 30;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 16px;
-  padding: 24px;
-  text-align: center;
-  color: #fff;
+  width: 84px;
+  height: 84px;
+  margin-left: -42px;
+  border: 4px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   pointer-events: none;
 }
-.role-sheet.crew { background: linear-gradient(160deg, #6b7c5a, #3f5030); }
-.role-sheet.impostor { background: linear-gradient(160deg, #a8402c, #4a1710); }
-.role-sheet .role-icon { font-size: min(26vmin, 150px); line-height: 1; }
-.role-sheet h2 { margin: 0; font-size: clamp(34px, 8vmin, 64px); }
-.role-sheet p { margin: 0; font-size: clamp(18px, 3.4vmin, 28px); opacity: 0.92; }
-.role-team { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; max-width: 720px; }
-.role-mate {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 20px 8px 8px;
-  font-size: clamp(18px, 3vmin, 26px);
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.16);
-  border-radius: 999px;
-}
-.role-mate .avatar { width: 48px; height: 48px; font-size: 28px; }
+/* Bare en farge, så ingen kan lese rollen over skulderen. Blå og rød skilles også av de som ikke ser forskjell på rødt og grønt. */
+.role-sheet.crew { background: #2f7de1; }
+.role-sheet.impostor { background: #d64533; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.team-line { margin-top: 6px; font-size: 14px; opacity: 0.9; }
 
 @media (min-width: 700px) {
+  .role-sheet { bottom: 150px; width: 104px; height: 104px; margin-left: -52px; }
   .role-peek { padding: 20px 40px; font-size: 21px; }
   body.has-peek .sheet { padding-bottom: 128px; }
 }
@@ -752,7 +741,7 @@ body.has-peek .sheet { padding-bottom: 104px; }
 .pot-head span { color: var(--muted); font-variant-numeric: tabular-nums; }
 .pot-track { position: relative; height: 12px; margin: 10px 0 24px; border-radius: 99px; background: #fff; border: 1px solid var(--line); }
 .pot-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--mustard), var(--orange)); transition: width 0.6s ease; }
-.pot-mark { position: absolute; top: 16px; transform: translateX(-50%); font-size: 18px; filter: grayscale(1); opacity: 0.5; }
+.pot-mark { position: absolute; top: 16px; transform: translateX(-50%); font-size: 16px; filter: grayscale(1); opacity: 0.5; }
 .pot-mark.on { filter: none; opacity: 1; }
 .pot-next { font-size: 13px; color: var(--muted); }
 .pill.ok { background: #dcebd0; color: var(--olive-dark); }
@@ -782,3 +771,25 @@ body.has-peek .sheet { padding-bottom: 104px; }
 /* Lydknappen ligger til venstre for fullskjermknappen */
 #snd-btn { right: 70px; }
 @media (min-width: 700px) { #snd-btn { right: 90px; } }
+
+/* Natt-skjermen til impostorene: hvem har valgt hvem */
+.night-status { margin: 0 0 10px; padding: 10px 14px; border-radius: 14px; background: var(--card); color: var(--ink); font-size: 14px; text-align: center; }
+.night-status.agreed { background: #f6d6cc; color: var(--danger); font-weight: 600; }
+#night-list .row.voted { border-color: var(--orange); background: #fff7e8; }
+#night-list .row.majority { border-color: var(--danger); background: #f9e0d8; box-shadow: 0 0 0 2px rgba(181, 85, 58, 0.25); }
+#night-list .row.selected .radio { border-color: var(--danger); background: var(--danger); box-shadow: inset 0 0 0 4px #fff; }
+.voters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.voter { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 2px; border-radius: 99px; background: #fff; border: 1px solid var(--orange); font-size: 12px; font-weight: 500; color: var(--ink); }
+.voter .avatar { width: 20px; height: 20px; font-size: 12px; }
+.voter.you { padding: 2px 9px; background: var(--orange); border-color: var(--orange); font-weight: 600; }
+.pill.vote-count { background: var(--orange); color: var(--ink); }
+.row.majority .pill.vote-count { background: var(--danger); color: #fff; }
+
+/* Mistenkt gruppe (Detective) og oppdrag for impostorene */
+.pill.sus { background: #e9d6f2; color: #5b3a73; }
+.mission-box { margin: 0 0 12px; padding: 12px 14px; border-radius: 16px; background: #2f2a4a; color: #fff; }
+.mission-box strong { display: block; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.8; }
+.mission-box .mission-text { margin-top: 2px; font-size: 16px; font-weight: 600; }
+.mission-box .mission-bar { height: 6px; margin-top: 8px; border-radius: 99px; background: rgba(255, 255, 255, 0.2); overflow: hidden; }
+.mission-box .mission-bar div { height: 100%; background: var(--mustard); transition: width 0.5s ease; }
+.mission-box .btn { margin-top: 10px; }
