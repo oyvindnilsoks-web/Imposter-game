@@ -793,3 +793,21 @@ body.has-peek .sheet { padding-bottom: 104px; }
 .mission-box .mission-bar { height: 6px; margin-top: 8px; border-radius: 99px; background: rgba(255, 255, 255, 0.2); overflow: hidden; }
 .mission-box .mission-bar div { height: 100%; background: var(--mustard); transition: width 0.5s ease; }
 .mission-box .btn { margin-top: 10px; }
+
+/* De som er ute: tabellen, veien tilbake og galgespill */
+.ghost-box { margin: 18px 0 0; padding: 16px; border-radius: 20px; background: #efe8f6; color: #3b2b4d; }
+.ghost-box h3 { margin: 0; font-size: 18px; }
+.ghost-box p { margin: 4px 0 12px; font-size: 13px; opacity: 0.85; }
+.ghost-box .row { background: #fff; }
+.ghost-box .row .bar { background: #d9c6ec; }
+.ghost-box .comeback { margin: 0 0 12px; padding: 10px 12px; border-radius: 14px; background: #fff; font-size: 14px; }
+.ghost-box .comeback .progress { margin-top: 6px; }
+.ghost-box .btn { margin-top: 12px; }
+.hm-lives { margin: 8px 0; text-align: center; font-size: 26px; letter-spacing: 4px; min-height: 36px; }
+.hm-hint { text-align: center; font-size: 56px; line-height: 1.1; }
+.hm-word { margin: 10px 0 16px; text-align: center; font-size: 36px; font-weight: 700; letter-spacing: 8px; font-variant-numeric: tabular-nums; }
+.hm-keys { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.hm-keys button { padding: 12px 0; font: inherit; font-weight: 600; font-size: 16px; color: var(--ink); background: var(--card); border: 2px solid var(--line); border-radius: 10px; cursor: pointer; }
+.hm-keys button:disabled { opacity: 0.35; cursor: default; }
+.hm-keys button.hit { background: #dcebd0; border-color: var(--ok); }
+.hm-keys button.miss { background: #f6d6cc; border-color: var(--danger); }
