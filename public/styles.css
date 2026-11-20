@@ -767,3 +767,10 @@ body.has-peek .sheet { padding-bottom: 104px; }
 .task-feedback.bad { color: var(--danger); }
 .choice.right { border-color: var(--ok); background: #e6f2dc; }
 .choice.wrong { border-color: var(--danger); background: #f6d6cc; }
+
+/* Tilfeldige impostorer */
+.imp-random { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 14px; font-weight: 600; }
+.imp-random > span:last-child { display: flex; gap: 8px; }
+.imp-random .chip { min-width: 48px; padding: 10px 0; text-align: center; font-weight: 700; }
+.imp-random .chip.on { border-color: var(--orange); background: #fff7e8; }
+.imp-random .chip:disabled { opacity: 0.4; cursor: not-allowed; }
