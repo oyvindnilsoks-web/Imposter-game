@@ -782,3 +782,16 @@ body.has-peek .sheet { padding-bottom: 104px; }
 /* Lydknappen ligger til venstre for fullskjermknappen */
 #snd-btn { right: 70px; }
 @media (min-width: 700px) { #snd-btn { right: 90px; } }
+
+/* Natt-skjermen til impostorene: hvem har valgt hvem */
+.night-status { margin: 0 0 10px; padding: 10px 14px; border-radius: 14px; background: var(--card); color: var(--ink); font-size: 14px; text-align: center; }
+.night-status.agreed { background: #f6d6cc; color: var(--danger); font-weight: 600; }
+#night-list .row.voted { border-color: var(--orange); background: #fff7e8; }
+#night-list .row.majority { border-color: var(--danger); background: #f9e0d8; box-shadow: 0 0 0 2px rgba(181, 85, 58, 0.25); }
+#night-list .row.selected .radio { border-color: var(--danger); background: var(--danger); box-shadow: inset 0 0 0 4px #fff; }
+.voters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.voter { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 2px; border-radius: 99px; background: #fff; border: 1px solid var(--orange); font-size: 12px; font-weight: 500; color: var(--ink); }
+.voter .avatar { width: 20px; height: 20px; font-size: 12px; }
+.voter.you { padding: 2px 9px; background: var(--orange); border-color: var(--orange); font-weight: 600; }
+.pill.vote-count { background: var(--orange); color: var(--ink); }
+.row.majority .pill.vote-count { background: var(--danger); color: #fff; }

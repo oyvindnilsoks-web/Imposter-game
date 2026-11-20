@@ -210,15 +210,43 @@
     const picks = state.nightPicks || {};
     const byId = new Map(state.players.map((player) => [player.id, player]));
     const targets = state.players.filter((player) => !player.eliminated && player.id !== self.id && !mates.has(player.id));
-    $('night-list').innerHTML = targets.map((player, index) => {
-      const backers = Object.entries(picks)
-        .filter(([impostor, target]) => target === player.id && impostor !== self.id)
-        .map(([impostor]) => byId.get(impostor))
-        .filter(Boolean);
-      return `<li><button class="row choice${isFresh('night', player.id) ? ' fresh' : ''}${picks[self.id] === player.id ? ' selected' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
+
+    // Hvem har valgt hvem. De som har fått flest valg ligger øverst, ellers i den vanlige rekkefølgen.
+    const pickers = new Map(); // mål -> impostorene som har valgt det
+    for (const [impostor, target] of Object.entries(picks)) {
+      if (!pickers.has(target)) pickers.set(target, []);
+      pickers.get(target).push(impostor);
+    }
+    const votesFor = (player) => (pickers.get(player.id) || []).length;
+    const order = new Map(targets.map((player, index) => [player.id, index]));
+    const sorted = [...targets].sort((a, b) => votesFor(b) - votesFor(a) || order.get(a.id) - order.get(b.id));
+
+    // Hvor mange som må være enige: mer enn halvparten av impostorene som er med.
+    const alive = 1 + (state.mates || []).filter((id) => byId.get(id) && !byId.get(id).eliminated).length;
+    const need = Math.floor(alive / 2) + 1;
+    const top = sorted.length ? votesFor(sorted[0]) : 0;
+    const leader = top > 0 ? sorted[0] : null;
+    const status = $('night-status');
+    status.className = `night-status${top >= need ? ' agreed' : ''}`;
+    if (top >= need) status.textContent = `✅ ${leader.name} has ${top} of ${alive} votes. The night ends when everyone has chosen.`;
+    else if (top > 0) status.textContent = `No majority yet. ${need} of ${alive} must pick the same player. ${leader.name} has ${top}.`;
+    else status.textContent = 'Tap a player to suggest who to kill.';
+
+    $('night-list').innerHTML = sorted.map((player, index) => {
+      const who = (pickers.get(player.id) || []).map((id) => (id === self.id ? { you: true } : byId.get(id))).filter(Boolean);
+      const count = who.length;
+      const chips = who.map((voter) => (voter.you
+        ? '<span class="voter you">You</span>'
+        : `<span class="voter"><span class="avatar">${avatarHtml(voter)}</span>${esc(voter.name)}</span>`)).join('');
+      const classes = ['row', 'choice'];
+      if (isFresh('night', player.id)) classes.push('fresh');
+      if (picks[self.id] === player.id) classes.push('selected');
+      if (count) classes.push('voted');
+      if (count >= need) classes.push('majority');
+      return `<li><button class="${classes.join(' ')}" style="--i:${index}" data-id="${esc(player.id)}">
         <div class="avatar">${avatarHtml(player)}</div>
-        <div class="name">${esc(player.name)}</div>
-        ${backers.length ? `<span class="backers" title="Your team picked this player">${backers.map((mate) => `<span class="avatar">${avatarHtml(mate)}</span>`).join('')}</span>` : ''}
+        <div class="name">${esc(player.name)}${count ? `<small class="voters">${chips}</small>` : ''}</div>
+        ${count ? `<span class="pill vote-count">${count} ${count === 1 ? 'vote' : 'votes'}</span>` : ''}
         <span class="radio"></span>
       </button></li>`;
     }).join('');
