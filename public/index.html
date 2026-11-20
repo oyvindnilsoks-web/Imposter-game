@@ -94,6 +94,19 @@
         <button class="btn secondary" id="task-back">Back</button>
       </section>
 
+      <!-- Galgespill for de som er ute. Gir ingen poeng. -->
+      <section id="screen-hangman" hidden>
+        <h2>Hangman</h2>
+        <p class="lead">Guess the English word, one letter at a time. Just for fun. It gives no points.</p>
+        <div class="hm-lives" id="hm-lives"></div>
+        <div class="hm-hint" id="hm-hint"></div>
+        <div class="hm-word" id="hm-word"></div>
+        <div class="hm-keys" id="hm-keys"></div>
+        <div class="task-feedback" id="hm-msg"></div>
+        <button class="btn orange" id="hm-next" hidden>Next word</button>
+        <button class="btn secondary" id="hm-back">Back</button>
+      </section>
+
       <!-- Resultat -->
       <section id="screen-result" hidden>
         <div class="status" id="result-status">
@@ -106,6 +119,7 @@
       </section>
       <div class="task-btn-wrap"><button class="btn orange" id="task-btn" hidden>📝 Earn points for the team</button></div>
       <!-- Til de som er ute: noe nyttig å gjøre mens de andre blir ferdige. -->
+      <div class="ghost-box" id="ghost-box" hidden></div>
       <div class="out-note" id="out-note" hidden>
         <strong>You are out, but you can keep learning.</strong>
         <span>Work on your words while you wait for the others to finish.</span>

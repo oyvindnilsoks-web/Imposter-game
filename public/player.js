@@ -4,7 +4,7 @@
   const api = window.ImposterApi;
   const fx = window.ImposterFx;
   const $ = (id) => document.getElementById(id);
-  const SCREENS = ['join', 'wait', 'vote', 'night', 'task', 'result'];
+  const SCREENS = ['join', 'wait', 'vote', 'night', 'task', 'hangman', 'result'];
 
   let state = null; // tilstanden fra databasen
   let photos = {}; // spillerens id -> bilde, delt live og aldri lagret
@@ -19,6 +19,10 @@
   let task = null; // oppgaven som vises
   let built = []; // ordene eleven har trykket inn (setninger)
   let answering = false;
+  let roleWindowEnd = 0; // når du ikke lenger kan se rollen på nytt (ti sekunder etter første titt)
+  let roleTimer = null;
+  let holding = false;
+  let hangmanOpen = false;
   let suspectPick = null; // crew: den du mistenker i natt (bare lokalt, sendes aldri)
   let usedIndexes = []; // hvilke ordknapper som er brukt, i samme rekkefølge som built
   let watcher = null;
@@ -82,6 +86,8 @@
 
   function showJoin(error = '') {
     $('out-note').hidden = true;
+    $('ghost-box').hidden = true;
+    hangmanOpen = false;
     $('role-peek').hidden = true;
     document.body.classList.remove('has-peek');
     hideRole();
@@ -461,11 +467,13 @@
     $('out-note').hidden = !(self.eliminated && ['ready', 'night', 'voting', 'result'].includes(phase));
 
     // Knappen for å se rollen sin finnes når læreren har lagret impostorene
-    const canPeek = Boolean(state.myRole) && ['ready', 'night', 'voting', 'result'].includes(phase);
+    // Rollen kan bare ses én gang, før første avstemming. Databasen avgjør.
+    if (!state.canSeeRole) roleWindowEnd = 0;
+    const canPeek = Boolean(state.canSeeRole) && !(roleWindowEnd && Date.now() > roleWindowEnd);
     $('role-peek').hidden = !canPeek;
     document.body.classList.toggle('has-peek', canPeek);
     if (!canPeek) hideRole();
-    if (state.myRole) once(`roles-${state.code}`, () => fx.banner('🎭 Roles are ready. Hold the button: blue = crew, red = impostor.'));
+    if (state.canSeeRole) once(`roles-${state.code}`, () => fx.banner('🎭 Roles are ready. You can look once: hold the button. Blue = crew, red = impostor.'));
 
     if (phase === 'lobby') {
       setHero('', `Game ${state.code}`, "You're in!", `Hi, ${self.name}`);
@@ -530,14 +538,19 @@
     }
     // Det felles potten og oppgavene
     const showPot = Boolean(state.pot) && ['ready', 'night', 'voting', 'result'].includes(phase);
-    $('pot').hidden = !showPot || taskOpen;
+    $('pot').hidden = !showPot || taskOpen || hangmanOpen;
     $('pot').innerHTML = showPot ? fx.potHtml(state.pot) : '';
     if (taskOpen && !state.canTask) closeTask();
-    $('task-btn').hidden = !state.canTask || taskOpen || !$('screen-night').hidden;
+    $('task-btn').hidden = !state.canTask || taskOpen || !$('screen-night').hidden || hangmanOpen;
+    $('task-btn').textContent = state.comeback ? '📝 Earn your way back' : '📝 Earn points for the team';
     if (taskOpen) {
-      $('task-pot').innerHTML = fx.potHtml(state.pot);
+      $('task-pot').innerHTML = comebackHtml() || fx.potHtml(state.pot);
       show('task');
     }
+    // De som er ute: tabellen, veien tilbake og galgespill
+    if (hangmanOpen && !self.eliminated) hangmanOpen = false;
+    renderGhostBox(self);
+    if (hangmanOpen) show('hangman');
     effectsReady = true;
     for (const key of pendingSeen) seen.add(key);
     pendingSeen = [];
@@ -646,6 +659,129 @@
     $('photo-preview').innerHTML = myPhoto ? `<img src="${esc(myPhoto)}" alt="Your photo">` : '📷';
     $('photo-btn').classList.toggle('has-photo', Boolean(myPhoto));
   }
+
+  // ---- De som er ute
+  function comebackHtml() {
+    const comeback = state && state.comeback;
+    if (!comeback) return '';
+    return `<div class="pot-head"><strong>💚 Your way back</strong><span>${comeback.points} of ${comeback.goal}</span></div>
+      <div class="pot-track"><div class="pot-fill" style="width:${Math.min(100, (comeback.points / comeback.goal) * 100)}%"></div></div>
+      <div class="pot-next">Every right answer is a point for you. At ${comeback.goal} you are back in the game.</div>`;
+  }
+
+  // Tabellen: de som er ute velger hvem de tror er impostor og ser en live oversikt. Ingen andre ser den.
+  function renderGhostBox(self) {
+    const box = $('ghost-box');
+    const visible = Boolean(state.ghost) && self.eliminated && !taskOpen && !hangmanOpen;
+    box.hidden = !visible;
+    if (!visible) return;
+    const counts = state.ghost.counts || {};
+    const max = Math.max(1, ...Object.values(counts));
+    const targets = state.players
+      .filter((player) => !player.eliminated && player.id !== self.id)
+      .sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0));
+    const comeback = state.comeback
+      ? `<div class="comeback">${comebackHtml() ? `<div class="pot">${comebackHtml()}</div>` : ''}</div>`
+      : '';
+    box.innerHTML = `<h3>👻 Who is the impostor?</h3>
+      <p>Only players who are out can see this table. It does not change the game.</p>
+      ${comeback}
+      <ul class="list grid" id="ghost-list">${targets.map((player, index) => `<li><button type="button" class="row choice${state.ghost.mine === player.id ? ' selected' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
+        <div class="bar" style="width:${((counts[player.id] || 0) / max) * 100}%"></div>
+        <div class="avatar">${avatarHtml(player)}</div>
+        <div class="name">${esc(player.name)}</div>
+        ${counts[player.id] ? `<span class="pill soft">${counts[player.id]}</span>` : ''}
+        <span class="radio"></span>
+      </button></li>`).join('')}</ul>
+      <button type="button" class="btn secondary" id="hangman-btn">🎮 Play Hangman</button>`;
+  }
+
+  $('ghost-box').addEventListener('click', async (event) => {
+    if (event.target.closest('#hangman-btn')) return openHangman();
+    const button = event.target.closest('#ghost-list .choice');
+    if (!button || !state || !state.ghost) return;
+    const target = button.dataset.id;
+    const before = state;
+    // Vis valget med en gang. Går noe galt, ruller vi tilbake.
+    const counts = { ...(state.ghost.counts || {}) };
+    if (state.ghost.mine) counts[state.ghost.mine] = Math.max(0, (counts[state.ghost.mine] || 1) - 1);
+    counts[target] = (counts[target] || 0) + 1;
+    state = { ...state, ghost: { counts, mine: target } };
+    lastKey = '';
+    view();
+    try {
+      await api.rpc('imposter_ghost_pick', { p_code: session.code, p_secret: session.secret, p_target: target });
+    } catch (error) {
+      state = before;
+      lastKey = '';
+      view();
+      toast(error.message);
+    }
+    watcher.refresh();
+  });
+
+  // ---- Galgespill (bare for moro, ingen poeng)
+  const HANGMAN_WORDS = [
+    ['apple', '🍎'], ['house', '🏠'], ['water', '💧'], ['happy', '😀'], ['green', '🟢'], ['sun', '☀️'], ['moon', '🌙'],
+    ['tree', '🌳'], ['book', '📖'], ['bread', '🍞'], ['fish', '🐟'], ['horse', '🐴'], ['music', '🎵'], ['school', '🏫'],
+    ['friend', '🤝'], ['pizza', '🍕'], ['train', '🚆'], ['rabbit', '🐰'], ['banana', '🍌'], ['orange', '🍊'], ['flower', '🌸'],
+    ['winter', '❄️'], ['summer', '🏖️'], ['bicycle', '🚲'], ['teacher', '🧑‍🏫'], ['kitchen', '🍳'], ['window', '🪟'], ['clock', '🕒'],
+    ['pencil', '✏️'], ['cheese', '🧀'], ['cloud', '☁️'], ['rain', '🌧️'], ['chair', '🪑'], ['mountain', '⛰️'], ['rocket', '🚀'],
+    ['guitar', '🎸'], ['butter', '🧈'], ['carrot', '🥕'], ['monkey', '🐵'], ['spider', '🕷️'], ['island', '🏝️'], ['bridge', '🌉'],
+  ];
+  const hangman = { word: '', hint: '', guessed: new Set(), wrong: 0, last: -1 };
+  const LIVES = 6;
+
+  function newHangmanWord() {
+    let index;
+    do { index = Math.floor(Math.random() * HANGMAN_WORDS.length); } while (index === hangman.last && HANGMAN_WORDS.length > 1);
+    hangman.last = index;
+    [hangman.word, hangman.hint] = HANGMAN_WORDS[index];
+    hangman.guessed = new Set();
+    hangman.wrong = 0;
+    drawHangman();
+  }
+
+  function drawHangman() {
+    const done = [...hangman.word].every((letter) => hangman.guessed.has(letter));
+    const lost = hangman.wrong >= LIVES;
+    $('hm-lives').textContent = '❤️'.repeat(LIVES - hangman.wrong) + '🖤'.repeat(hangman.wrong);
+    $('hm-hint').textContent = hangman.hint;
+    $('hm-word').textContent = [...hangman.word].map((letter) => (hangman.guessed.has(letter) || lost ? letter.toUpperCase() : '_')).join(' ');
+    $('hm-keys').innerHTML = 'abcdefghijklmnopqrstuvwxyz'.split('').map((letter) => {
+      const tried = hangman.guessed.has(letter);
+      const hit = tried && hangman.word.includes(letter);
+      return `<button type="button" data-letter="${letter}" class="${tried ? (hit ? 'hit' : 'miss') : ''}" ${tried || done || lost ? 'disabled' : ''}>${letter.toUpperCase()}</button>`;
+    }).join('');
+    const message = $('hm-msg');
+    message.className = `task-feedback${done ? ' good' : lost ? ' bad' : ''}`;
+    message.textContent = done ? '🎉 You got it!' : lost ? `The word was ${hangman.word.toUpperCase()}.` : '';
+    $('hm-next').hidden = !(done || lost);
+  }
+
+  function openHangman() {
+    hangmanOpen = true;
+    newHangmanWord();
+    lastKey = '';
+    view();
+  }
+
+  function closeHangman() {
+    hangmanOpen = false;
+    lastKey = '';
+    view();
+  }
+
+  $('hm-keys').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-letter]');
+    if (!button || button.disabled) return;
+    const letter = button.dataset.letter;
+    hangman.guessed.add(letter);
+    if (!hangman.word.includes(letter)) hangman.wrong += 1;
+    drawHangman();
+  });
+  $('hm-next').addEventListener('click', newHangmanWord);
+  $('hm-back').addEventListener('click', closeHangman);
 
   // ---- Oppgaver
   function closeTask() {
@@ -757,22 +893,41 @@
   $('wait-photo-btn').addEventListener('click', () => $('photo-input').click());
 
   // Rollen vises bare mens knappen holdes inne, så ingen ser den over skulderen.
-  // Rollen vises bare som en liten farge mens knappen holdes inne: blå er crew, rød er impostor.
-  // Teksten er skjult for skjermlesere. Impostorene ser lagkameratene sine på natt-skjermen.
-  function showRole() {
-    if (!state || !state.myRole) return;
+  // Rollen hentes fra databasen når knappen trykkes, og bare én gang (før første avstemming). Den vises som en
+  // liten farge mens knappen holdes inne: blå er crew, rød er impostor. Teksten er skjult for skjermlesere.
+  async function showRole() {
+    if (!state || !state.canSeeRole || !session) return;
+    holding = true;
+    let seen;
+    try {
+      seen = await api.rpc('imposter_see_role', { p_code: session.code, p_secret: session.secret });
+    } catch (error) {
+      holding = false;
+      toast(error.message);
+      lastKey = '';
+      if (watcher) watcher.refresh();
+      return;
+    }
+    // Første titt starter de ti sekundene der du kan se igjen. Etterpå forsvinner knappen.
+    if (!roleWindowEnd) {
+      roleWindowEnd = Date.now() + 10000;
+      clearTimeout(roleTimer);
+      roleTimer = setTimeout(() => { lastKey = ''; view(); }, 10500);
+    }
+    if (!holding) return; // du slapp før svaret kom
     const sheet = $('role-sheet');
     const byId = new Map(state.players.map((player) => [player.id, player]));
-    const mates = (state.mates || []).map((id) => (byId.get(id) || {}).name).filter(Boolean);
-    const label = state.myRole === 'impostor'
+    const mates = (seen.mates || []).map((id) => (byId.get(id) || {}).name).filter(Boolean);
+    const label = seen.role === 'impostor'
       ? `You are an IMPOSTOR. ${mates.length ? `Your team: ${mates.join(', ')}.` : 'You are the only impostor.'}`
       : 'You are CREW.';
     sheet.innerHTML = `<span class="sr-only">${esc(label)}</span>`;
-    sheet.className = `role-sheet ${state.myRole}`;
+    sheet.className = `role-sheet ${seen.role}`;
     sheet.hidden = false;
   }
 
   function hideRole() {
+    holding = false;
     const sheet = $('role-sheet');
     sheet.hidden = true;
     sheet.innerHTML = '';

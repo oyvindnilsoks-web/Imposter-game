@@ -355,7 +355,7 @@
     if (phase === 'lobby' && !enoughToStart) hint = `You need at least ${state.minPlayers} players to start (${state.players.length}/${state.minPlayers}).`;
     else if (phase === 'ready') {
       hint = validPick
-        ? `${impostorIds.length} ${impostorIds.length === 1 ? 'impostor' : 'impostors'} saved. They are not shown on this screen. Players can now hold a button on their own screen to see their role. You can start the night, so the impostors choose who to kill, or just open the vote.`
+        ? `${impostorIds.length} ${impostorIds.length === 1 ? 'impostor' : 'impostors'} saved. They are not shown on this screen. Players can now look at their role once, before the first vote: they hold a button on their own screen. You can start the night, so the impostors choose who to kill, or just open the vote.`
         : 'Pick the impostors first. Nobody else will see them.';
     } else if (phase === 'night') hint = 'Everyone else keeps quiet. The night ends when most impostors agree, or when the time is up. If they do not agree, nobody is killed.';
     else if (phase === 'voting') hint = 'The vote closes by itself when everyone has voted.';
