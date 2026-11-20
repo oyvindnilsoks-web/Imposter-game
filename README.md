@@ -29,6 +29,8 @@ Oppgavene (A1–A2) ligger i `imposter_tasks` i databasen, helt nederst i `supab
 
 **Natten:** når impostorene er lagret, kan læreren trykke **Start the night** (velg tid: 30 s til 2 min). Tavla og de andre spillerne ser bare «Night falls». Impostorene som fortsatt er med får en egen skjerm der de velger hvem som skal bort (bare crew som er med kan velges). Hver impostor ser hvem lagkameratene har valgt, og kan ombestemme seg til tiden er ute. **Flertallet bestemmer:** mer enn halvparten av impostorene må velge samme spiller, ellers blir ingen drept. Natten slutter med en gang alle har valgt og flertallet er enig, når tiden går ut, eller når læreren trykker **End the night now**. Om morgenen ser alle hvem som er drept («Nobody was killed last night» hvis ingen). Drapet teller som en utkastelse og kan avgjøre spillet. **Someone was killed** finnes fortsatt, for de som spiller natten uten telefoner.
 
+**Tilfeldige impostorer:** i impostor-dialogen kan du trykke **🎲 Pick at random** og velge 1–4. Spillet trekker så tilfeldige spillere (antallet må være lavere enn antall crew). Dialogen er fortsatt sløret, og du kan trykke Save uten å trykke Show, så ikke engang du trenger å vite hvem det ble. Trykk på tallet igjen for å trekke på nytt.
+
 Dialogen for å velge impostorer er sløret helt til du trykker **Show** (trykk **Hide** for å skjule igjen), og valget sendes først når du trykker **Save**. Impostorene vises ikke noe sted på hovedskjermen før spillet er slutt, så du kan trygt vise den på tavla.
 
 ### Bilder

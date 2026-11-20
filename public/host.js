@@ -13,7 +13,7 @@
   let series = 0;
   let nightNo = 0;
   let closing = false;
-  let picker = { open: false, shown: false, draft: new Set() }; // impostor-dialogen, skjult til læreren trykker Show
+  let picker = { open: false, shown: false, random: false, draft: new Set() }; // impostor-dialogen, skjult til læreren trykker Show
   let killer = { open: false, target: null }; // dialogen for hvem som ble drept
   const seen = new Set();
   let pendingSeen = [];
@@ -398,24 +398,50 @@
         ${marked ? '<span class="pill imp">🎭 Impostor</span>' : ''}</button></li>`;
     }).join('');
     const count = picker.draft.size;
-    if (!picker.shown) $('imp-hint').textContent = '';
+    // Tilfeldig trekning: 1 til 4, men alltid færre impostorer enn crew.
+    $('imp-random-btns').innerHTML = [1, 2, 3, 4].map((n) => {
+      const ok = n < state.players.length - n;
+      const on = picker.random && count === n;
+      return `<button type="button" class="chip${on ? ' on' : ''}" data-n="${n}" ${ok ? '' : 'disabled'}>${n}</button>`;
+    }).join('');
+    if (!picker.shown && picker.random && validDraft()) {
+      $('imp-hint').textContent = `${count} random ${count === 1 ? 'impostor' : 'impostors'} picked. Nobody has seen who. Tap Save, or Show to look.`;
+    } else if (!picker.shown) $('imp-hint').textContent = '';
     else if (count === 0) $('imp-hint').textContent = 'Tap the players who are the impostors.';
     else if (validDraft()) $('imp-hint').textContent = `${count} picked. Tap Save when you are done.`;
     else $('imp-hint').textContent = 'There must be more crew than impostors.';
-    $('imp-save').disabled = !picker.shown || !validDraft();
+    $('imp-save').disabled = !(picker.shown || picker.random) || !validDraft();
   }
 
   function openPicker() {
-    picker = { open: true, shown: false, draft: new Set((state && state.impostorIds) || []) };
+    picker = { open: true, shown: false, random: false, draft: new Set((state && state.impostorIds) || []) };
     renderPicker();
   }
 
   function closePicker() {
-    picker = { open: false, shown: false, draft: new Set() };
+    picker = { open: false, shown: false, random: false, draft: new Set() };
     $('imp-modal').hidden = true;
   }
 
   $('imp-btn').addEventListener('click', openPicker);
+  // Trekker n tilfeldige spillere. Listen er fortsatt sløret, så ingen ser hvem det ble.
+  function randomPick(n) {
+    const ids = state.players.map((player) => player.id);
+    const bytes = new Uint32Array(ids.length);
+    crypto.getRandomValues(bytes);
+    for (let i = ids.length - 1; i > 0; i--) {
+      const j = bytes[i] % (i + 1);
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+    return new Set(ids.slice(0, n));
+  }
+  $('imp-random-btns').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-n]');
+    if (!button || button.disabled) return;
+    picker.draft = randomPick(Number(button.dataset.n));
+    picker.random = true;
+    renderPicker();
+  });
   $('imp-show').addEventListener('click', () => {
     picker.shown = true;
     renderPicker();
@@ -431,6 +457,7 @@
     const id = button.dataset.id;
     if (picker.draft.has(id)) picker.draft.delete(id);
     else picker.draft.add(id);
+    picker.random = false;
     renderPicker();
   });
   $('imp-save').addEventListener('click', async () => {
