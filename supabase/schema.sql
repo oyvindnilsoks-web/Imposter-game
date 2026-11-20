@@ -101,6 +101,20 @@ alter table imposter_players add column if not exists mission jsonb;
 alter table imposter_players add column if not exists card text;
 alter table imposter_players add column if not exists missions_done integer not null default 0;
 
+-- Seeing your role: once, before the first vote. Coming back: the first two players out can earn their way back.
+alter table imposter_players add column if not exists role_seen_at timestamptz;
+alter table imposter_players add column if not exists out_rank integer;
+alter table imposter_players add column if not exists comeback_points integer not null default 0;
+alter table imposter_players add column if not exists comeback_used boolean not null default false;
+
+-- What the players who are out think: who they suspect. Only the players who are out can see this.
+create table if not exists imposter_ghost_picks (
+  game_code text not null references imposter_games (code) on delete cascade,
+  ghost_id uuid not null references imposter_players (id) on delete cascade,
+  target_id uuid not null references imposter_players (id) on delete cascade,
+  primary key (game_code, ghost_id)
+);
+
 -- The tasks. The answers stay here: the browser only gets the question and the choices.
 create table if not exists imposter_tasks (
   id serial primary key,
@@ -134,9 +148,10 @@ alter table imposter_votes enable row level security;
 alter table imposter_night_picks enable row level security;
 alter table imposter_tasks enable row level security;
 alter table imposter_task_log enable row level security;
+alter table imposter_ghost_picks enable row level security;
 
 revoke all on imposter_games, imposter_secrets, imposter_players, imposter_votes, imposter_night_picks,
-  imposter_tasks, imposter_task_log
+  imposter_tasks, imposter_task_log, imposter_ghost_picks
   from anon, authenticated;
 
 grant select on imposter_games to anon, authenticated;
@@ -201,6 +216,27 @@ begin
 end;
 $$;
 
+-- Marks a player as out. The first two players out are ranked: they can earn their way back.
+create or replace function imposter_mark_out(p_player uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_code text;
+  v_ranked integer;
+begin
+  select game_code into v_code from imposter_players where id = p_player;
+  select count(*) into v_ranked from imposter_players where game_code = v_code and out_rank is not null;
+  update imposter_players
+     set eliminated = true,
+         eliminated_at = now(),
+         out_rank = case when out_rank is null and v_ranked < 2 then v_ranked + 1 else out_rank end
+   where id = p_player;
+end;
+$$;
+
 -- Counts the votes, crosses out the player with the most votes, and shows the result.
 -- A tie (or no votes at all) means nobody is voted out.
 create or replace function imposter_close_vote_internal(p_code text)
@@ -258,7 +294,7 @@ begin
   end if;
 
   if v_out is not null then
-    update imposter_players set eliminated = true, eliminated_at = now() where id = v_out;
+    perform imposter_mark_out(v_out);
 
     -- The crew wins when all impostors are out. The impostors win when they are as many as the crew.
     select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
@@ -457,7 +493,8 @@ begin
   update imposter_players
      set mission = case when id = any(v_ids) then imposter_new_mission() else null end,
          card = null,
-         missions_done = 0
+         missions_done = 0,
+         role_seen_at = null
    where game_code = v_game.code;
   update imposter_games set updated_at = now() where code = v_game.code;
 end;
@@ -528,7 +565,7 @@ declare
   v_runoff uuid[];
 begin
   select * into v_game from imposter_games where code = p_code;
-  update imposter_players set eliminated = true, eliminated_at = now() where id = p_player;
+  perform imposter_mark_out(p_player);
 
   select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
     into v_crew, v_impostors
@@ -877,8 +914,10 @@ begin
   delete from imposter_task_log where game_code = v_game.code;
   update imposter_players
      set eliminated = false, is_impostor = false, current_task = null,
-         eliminated_at = null, mission = null, card = null, missions_done = 0
+         eliminated_at = null, mission = null, card = null, missions_done = 0,
+         role_seen_at = null, out_rank = null, comeback_points = 0, comeback_used = false
    where game_code = v_game.code;
+  delete from imposter_ghost_picks where game_code = v_game.code;
   update imposter_games
      set phase = 'lobby',
          round = 0,
@@ -947,6 +986,7 @@ begin
   v_phase := v_game.phase;
   v_winner := v_game.winner;
   update imposter_players set eliminated = false, eliminated_at = null where id = p_player;
+  delete from imposter_ghost_picks where ghost_id = p_player;
 
   if exists (select 1 from imposter_players where game_code = v_game.code and is_impostor) then
     select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
@@ -1272,6 +1312,8 @@ declare
   v_correct boolean;
   v_counted boolean;
   v_capped boolean := false;
+  v_comeback boolean;
+  v_points integer;
   v_goals integer[];
   v_pot integer;
   v_level integer;
@@ -1290,7 +1332,9 @@ begin
 
   select * into v_task from imposter_tasks where id = p_task;
   v_correct := lower(regexp_replace(btrim(coalesce(p_answer, '')), '\s+', ' ', 'g')) = lower(v_task.answer);
-  v_counted := v_correct and not v_me.is_impostor;
+  -- The first two crew members who go out earn points for themselves, to come back. Not for the pot.
+  v_comeback := v_me.eliminated and v_me.out_rank is not null and not v_me.is_impostor and not v_me.comeback_used;
+  v_counted := v_correct and not v_me.is_impostor and not v_comeback;
   if v_counted and (
     select count(*) from imposter_task_log
      where game_code = v_game.code and player_id = v_me.id and round = v_game.round and counted
@@ -1302,6 +1346,15 @@ begin
   insert into imposter_task_log (game_code, player_id, task_id, round, correct, counted)
   values (v_game.code, v_me.id, v_task.id, v_game.round, v_correct, v_counted);
   update imposter_players set current_task = null where id = v_me.id;
+
+  if v_comeback and v_correct then
+    v_points := v_me.comeback_points + 1;
+    update imposter_players set comeback_points = v_points where id = v_me.id;
+    if v_points >= 20 then
+      update imposter_players set comeback_used = true where id = v_me.id;
+      perform imposter_revive_internal(v_game.code, v_me.id);
+    end if;
+  end if;
 
   if v_counted then
     v_pot := v_game.pot + 1;
@@ -1317,6 +1370,81 @@ begin
   end if;
 
   return jsonb_build_object('correct', v_correct, 'answer', v_task.answer, 'capped', v_capped and not v_me.is_impostor);
+end;
+$$;
+
+-- Player: see your role. Only once, and only before the first vote. You can look again for ten
+-- seconds, in case the first look was missed. After that the role is never shown again.
+create or replace function imposter_see_role(p_code text, p_secret text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games;
+  v_me imposter_players;
+  v_mates jsonb;
+begin
+  select * into v_game from imposter_games where code = upper(btrim(p_code)) for update;
+  if not found then
+    raise exception 'Game not found. Check the code.';
+  end if;
+  select * into v_me from imposter_players where game_code = v_game.code and secret = p_secret;
+  if not found then
+    raise exception 'You are not in this game.';
+  end if;
+  if not exists (select 1 from imposter_players where game_code = v_game.code and is_impostor) then
+    raise exception 'The roles are not ready yet.';
+  end if;
+  if v_game.round > 0 or v_game.phase not in ('ready', 'night') then
+    raise exception 'You can only see your role before the first vote.';
+  end if;
+  if v_me.role_seen_at is not null and v_me.role_seen_at < now() - interval '10 seconds' then
+    raise exception 'You have already seen your role.';
+  end if;
+  if v_me.role_seen_at is null then
+    update imposter_players set role_seen_at = now() where id = v_me.id;
+  end if;
+  if v_me.is_impostor then
+    select coalesce(jsonb_agg(id order by joined_at, id), '[]'::jsonb) into v_mates
+      from imposter_players where game_code = v_game.code and is_impostor and id <> v_me.id;
+  end if;
+  return jsonb_build_object('role', case when v_me.is_impostor then 'impostor' else 'crew' end, 'mates', v_mates);
+end;
+$$;
+
+-- Player who is out: say who you think the impostor is. The other players who are out see the table.
+create or replace function imposter_ghost_pick(p_code text, p_secret text, p_target uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games;
+  v_me imposter_players;
+  v_target imposter_players;
+begin
+  select * into v_game from imposter_games where code = upper(btrim(p_code)) for update;
+  if not found then
+    raise exception 'Game not found. Check the code.';
+  end if;
+  if v_game.phase not in ('ready', 'night', 'voting', 'result') then
+    raise exception 'You can not pick now.';
+  end if;
+  select * into v_me from imposter_players where game_code = v_game.code and secret = p_secret;
+  if not found or not v_me.eliminated then
+    raise exception 'Only players who are out can use the table.';
+  end if;
+  select * into v_target from imposter_players where id = p_target and game_code = v_game.code;
+  if not found or v_target.eliminated or v_target.id = v_me.id then
+    raise exception 'Invalid choice.';
+  end if;
+  insert into imposter_ghost_picks (game_code, ghost_id, target_id)
+  values (v_game.code, v_me.id, v_target.id)
+  on conflict (game_code, ghost_id) do update set target_id = excluded.target_id;
+  update imposter_games set updated_at = now() where code = v_game.code;
 end;
 $$;
 
@@ -1351,6 +1479,9 @@ declare
   v_mission jsonb;
   v_card text;
   v_vote_list jsonb;
+  v_my_row imposter_players;
+  v_ghost jsonb;
+  v_comeback jsonb;
 begin
   select * into v_game from imposter_games where code = upper(btrim(p_code));
   if not found then
@@ -1399,6 +1530,30 @@ begin
       select coalesce(jsonb_agg(id order by joined_at, id), '[]'::jsonb)
         into v_mates
         from imposter_players where game_code = v_game.code and is_impostor and id <> v_me;
+    end if;
+  end if;
+
+  if v_me is not null then
+    select * into v_my_row from imposter_players where id = v_me;
+    -- Coming back: the first two crew members who go out can earn their way back with 20 points.
+    if v_my_row.eliminated and v_my_row.out_rank is not null and not v_my_row.is_impostor and not v_my_row.comeback_used then
+      v_comeback := jsonb_build_object('points', v_my_row.comeback_points, 'goal', 20);
+    end if;
+    -- The table of the players who are out. Nobody else sees it.
+    if v_my_row.eliminated and v_game.phase in ('ready', 'night', 'voting', 'result') then
+      select jsonb_build_object(
+               'counts', coalesce((
+                 select jsonb_object_agg(target_id::text, c) from (
+                   select g.target_id, count(*) as c
+                     from imposter_ghost_picks g
+                     join imposter_players t on t.id = g.target_id and not t.eliminated
+                     join imposter_players gp on gp.id = g.ghost_id and gp.eliminated
+                    where g.game_code = v_game.code
+                    group by g.target_id
+                 ) x
+               ), '{}'::jsonb),
+               'mine', (select target_id from imposter_ghost_picks where ghost_id = v_me)
+             ) into v_ghost;
     end if;
   end if;
 
@@ -1478,6 +1633,12 @@ begin
     'votes', v_vote_list,
     'mission', v_mission,
     'card', v_card,
+    'canSeeRole', case when v_me is null or not v_roles_set then false
+      else v_game.round = 0 and v_game.phase in ('ready', 'night')
+           and (v_my_row.role_seen_at is null or v_my_row.role_seen_at >= now() - interval '10 seconds')
+    end,
+    'comeback', v_comeback,
+    'ghost', v_ghost,
     'clueIds', to_jsonb(v_game.clue_ids),
     'canTask', case when v_me is null then false else (
       select imposter_can_task(v_game.phase, p.eliminated, p.is_impostor) from imposter_players p where p.id = v_me
@@ -1519,6 +1680,9 @@ revoke all on function imposter_answer_task(text, text, integer, text) from publ
 revoke all on function imposter_can_task(text, boolean, boolean) from public, anon, authenticated;
 revoke all on function imposter_pot_goals(integer) from public, anon, authenticated;
 revoke all on function imposter_new_round(text, text) from public;
+revoke all on function imposter_mark_out(uuid) from public, anon, authenticated;
+revoke all on function imposter_see_role(text, text) from public;
+revoke all on function imposter_ghost_pick(text, text, uuid) from public;
 revoke all on function imposter_use_card(text, text) from public;
 revoke all on function imposter_revive_internal(text, uuid) from public, anon, authenticated;
 revoke all on function imposter_try_revive(text) from public, anon, authenticated;
@@ -1547,6 +1711,8 @@ grant execute on function imposter_next_task(text, text) to anon, authenticated;
 grant execute on function imposter_answer_task(text, text, integer, text) to anon, authenticated;
 
 grant execute on function imposter_use_card(text, text) to anon, authenticated;
+grant execute on function imposter_see_role(text, text) to anon, authenticated;
+grant execute on function imposter_ghost_pick(text, text, uuid) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Tasks (A1-A2). Safe to run again: tasks that already exist are skipped.

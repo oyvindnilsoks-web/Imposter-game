@@ -26,6 +26,8 @@ const PUBLIC_FUNCTIONS = new Set([
   'imposter_remove_player',
   'imposter_revive_player',
   'imposter_use_card',
+  'imposter_see_role',
+  'imposter_ghost_pick',
   'imposter_new_round',
   'imposter_next_task',
   'imposter_answer_task',

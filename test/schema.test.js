@@ -1177,3 +1177,130 @@ test('a new round clears the pot levels, the missions and the cards', async () =
   assert.equal(s.detectiveIds, null);
   assert.equal((await state(game, 0)).card, null);
 });
+
+// ---- Seeing your role once, coming back, and the table of the players who are out
+
+const seeRole = (game, player) =>
+  rpc('imposter_see_role', { p_code: game.code, p_secret: game.players[player].secret });
+const ago = (game, player, seconds) =>
+  db.query(`update imposter_players set role_seen_at = now() - make_interval(secs => $2) where id = $1`, [game.players[player].id, seconds]);
+
+test('a player can see their role once, before the first vote', async () => {
+  const lobby = await newGame(5);
+  await assert.rejects(seeRole(lobby, 0), /not ready yet/);
+  const game = await readyGame(6, [0, 1]);
+  assert.equal((await state(game, 3)).canSeeRole, true);
+  assert.equal((await state(game)).canSeeRole, false, 'nobody without a key');
+
+  const crew = await seeRole(game, 3);
+  assert.equal(crew.role, 'crew');
+  assert.equal(crew.mates, null);
+  const imp = await seeRole(game, 0);
+  assert.equal(imp.role, 'impostor');
+  assert.deepEqual(imp.mates, [game.players[1].id]);
+
+  // A second look in the first ten seconds is fine, after that it is not
+  await seeRole(game, 3);
+  await ago(game, 3, 30);
+  await assert.rejects(seeRole(game, 3), /already seen/);
+  assert.equal((await state(game, 3)).canSeeRole, false);
+  assert.equal((await state(game, 4)).canSeeRole, true, 'the others still can');
+});
+
+test('the role cannot be seen after the first vote starts, and a new pick of impostors gives everyone a new look', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await seeRole(game, 3);
+  await ago(game, 3, 30);
+  await setImpostors(game, [2]);
+  assert.equal((await state(game, 3)).canSeeRole, true, 'new roles, a new look');
+  assert.equal((await seeRole(game, 2)).role, 'impostor');
+
+  await host(game, 'imposter_start_vote');
+  assert.equal((await state(game, 4)).canSeeRole, false);
+  await assert.rejects(seeRole(game, 4), /before the first vote/);
+});
+
+test('the role can also be seen in the night before the first vote', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await startNight(game);
+  assert.equal((await seeRole(game, 4)).role, 'crew');
+});
+
+test('a new round gives everyone a new look', async () => {
+  const game = await readyGame(3, [0]);
+  await seeRole(game, 1);
+  await ago(game, 1, 30);
+  await startNight(game);
+  await pick(game, 0, 1);
+  await host(game, 'imposter_new_round');
+  await host(game, 'imposter_start_game');
+  await setImpostors(game, [2]);
+  assert.equal((await seeRole(game, 1)).role, 'crew');
+});
+
+test('the first two crew members who go out can earn their way back with 20 points of their own', async () => {
+  const game = await readyGame(9, [0, 1]);
+  await killIdx(game, 3);
+  await killIdx(game, 4);
+  await killIdx(game, 5);
+  let s = await state(game, 3);
+  assert.deepEqual(s.comeback, { points: 0, goal: 20 });
+  assert.deepEqual((await state(game, 4)).comeback, { points: 0, goal: 20 });
+  assert.equal((await state(game, 5)).comeback, null, 'the third one out does not get the chance');
+  assert.equal((await state(game, 2)).comeback, null, 'players who are in have none');
+
+  for (let i = 0; i < 19; i++) await solve(game, 3);
+  s = await state(game, 3);
+  assert.equal(s.comeback.points, 19);
+  assert.equal(who(game, s, 3).eliminated, true);
+  assert.equal(s.pot.points, 0, 'the points are not for the pot');
+
+  await solve(game, 3);
+  s = await state(game, 3);
+  assert.equal(who(game, s, 3).eliminated, false, 'back in the game after 20');
+  assert.equal(s.comeback, null);
+  assert.equal(s.killedIds.includes(game.players[3].id), false);
+
+  // The third player out fills the pot as before
+  await solve(game, 5);
+  assert.equal((await state(game)).pot.points, 1);
+});
+
+test('an impostor who is out does not get a comeback, and a comeback can only be used once', async () => {
+  const game = await readyGame(9, [0, 1]);
+  await killIdx(game, 3);
+  assert.equal((await state(game, 3)).comeback.goal, 20);
+  await db.query('update imposter_players set comeback_points = 19 where id = $1', [game.players[3].id]);
+  await solve(game, 3);
+  assert.equal(who(game, await state(game), 3).eliminated, false);
+  await killIdx(game, 3);
+  assert.equal((await state(game, 3)).comeback, null, 'used');
+  await solve(game, 3);
+  assert.equal((await state(game)).pot.points, 1, 'and from then on the points are for the pot');
+});
+
+test('the table of the players who are out is only for them, and picks stop counting when the player is back', async () => {
+  const game = await readyGame(8, [0]);
+  await killIdx(game, 3);
+  await killIdx(game, 4);
+  await assert.rejects(rpc('imposter_ghost_pick', { p_code: game.code, p_secret: game.players[2].secret, p_target: game.players[1].id }), /Only players who are out/);
+  const ghost = (player, target) =>
+    rpc('imposter_ghost_pick', { p_code: game.code, p_secret: game.players[player].secret, p_target: game.players[target].id });
+  await assert.rejects(ghost(3, 4), /Invalid choice/, 'only players who are in can be picked');
+  await assert.rejects(ghost(3, 3), /Invalid choice/);
+  await ghost(3, 0);
+  await ghost(4, 0);
+  await ghost(4, 1);
+
+  let s = await state(game, 3);
+  assert.deepEqual(s.ghost.counts, { [game.players[0].id]: 1, [game.players[1].id]: 1 });
+  assert.equal(s.ghost.mine, game.players[0].id);
+  assert.equal((await state(game, 4)).ghost.mine, game.players[1].id, 'a new pick replaces the old one');
+  for (const view of [await state(game, 2), await state(game), await state(game, null, true)]) {
+    assert.equal(view.ghost, null, 'only the players who are out see the table');
+  }
+
+  await revive(game, 4);
+  s = await state(game, 3);
+  assert.deepEqual(s.ghost.counts, { [game.players[0].id]: 1 }, 'a player who is back no longer counts');
+});
