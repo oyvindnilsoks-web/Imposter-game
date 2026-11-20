@@ -842,6 +842,55 @@ begin
 end;
 $$;
 
+-- Host: bring a player back into the game (for a mistake, or as a reward). It works between rounds,
+-- and also after the game is over: if the game is no longer over, it goes on from the last result.
+create or replace function imposter_revive_player(p_code text, p_host_secret text, p_player uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+  v_crew integer;
+  v_impostors integer;
+  v_phase text := v_game.phase;
+  v_winner text := v_game.winner;
+begin
+  if v_game.phase not in ('ready', 'result', 'over') then
+    raise exception 'You can bring someone back between rounds.';
+  end if;
+  update imposter_players set eliminated = false
+   where id = p_player and game_code = v_game.code and eliminated;
+  if not found then
+    raise exception 'Invalid choice.';
+  end if;
+
+  if exists (select 1 from imposter_players where game_code = v_game.code and is_impostor) then
+    select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
+      into v_crew, v_impostors
+      from imposter_players where game_code = v_game.code and not eliminated;
+    if v_impostors = 0 then
+      v_phase := 'over';
+      v_winner := 'crew';
+    elsif v_impostors >= v_crew then
+      v_phase := 'over';
+      v_winner := 'impostors';
+    elsif v_game.phase = 'over' then
+      v_phase := case when v_game.round > 0 then 'result' else 'ready' end;
+      v_winner := null;
+    end if;
+  end if;
+
+  update imposter_games
+     set phase = v_phase,
+         winner = v_winner,
+         killed_ids = nullif(array_remove(killed_ids, p_player), '{}'),
+         updated_at = now()
+   where code = v_game.code;
+end;
+$$;
+
 -- Host: end the game for everyone.
 create or replace function imposter_end_game(p_code text, p_host_secret text)
 returns void
@@ -1172,6 +1221,7 @@ revoke all on function imposter_start_vote(text, text) from public;
 revoke all on function imposter_cast_vote(text, text, uuid) from public;
 revoke all on function imposter_close_vote(text, text) from public;
 revoke all on function imposter_remove_player(text, text, uuid) from public;
+revoke all on function imposter_revive_player(text, text, uuid) from public;
 revoke all on function imposter_end_game(text, text) from public;
 revoke all on function imposter_set_impostors(text, text, uuid[]) from public;
 revoke all on function imposter_kill_player(text, text, uuid) from public;
@@ -1192,6 +1242,7 @@ grant execute on function imposter_start_vote(text, text) to anon, authenticated
 grant execute on function imposter_cast_vote(text, text, uuid) to anon, authenticated;
 grant execute on function imposter_close_vote(text, text) to anon, authenticated;
 grant execute on function imposter_remove_player(text, text, uuid) to anon, authenticated;
+grant execute on function imposter_revive_player(text, text, uuid) to anon, authenticated;
 grant execute on function imposter_end_game(text, text) to anon, authenticated;
 grant execute on function imposter_set_impostors(text, text, uuid[]) to anon, authenticated;
 grant execute on function imposter_kill_player(text, text, uuid) to anon, authenticated;

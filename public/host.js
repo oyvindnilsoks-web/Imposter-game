@@ -17,6 +17,8 @@
   let nightNo = 0;
   let closing = false;
   let picker = { open: false, shown: false, random: false, draft: new Set() }; // impostor-dialogen, skjult til læreren trykker Show
+  let reviver = { open: false, target: null }; // dialogen for hvem som kommer tilbake
+  let lastOut = null; // hvem som var ute sist, for å se at noen kommer tilbake
   let killer = { open: false, target: null }; // dialogen for hvem som ble drept
   const seen = new Set();
   let pendingSeen = [];
@@ -36,6 +38,7 @@
     lastKey = '';
     closePicker();
     closeKiller();
+    closeReviver();
     try { localStorage.removeItem(STORE_KEY); } catch { /* ignorer */ }
   }
 
@@ -178,6 +181,7 @@
       series = state.series;
       played.clear();
       seen.clear();
+      lastOut = null;
     }
     pendingSeen = [];
     $('screen-create').hidden = true;
@@ -219,6 +223,16 @@
     } else if (quietNight) {
       $('kill-note').textContent = quietText;
     }
+    // Noen er tilbake i spillet
+    const outNow = new Set(state.players.filter((player) => player.eliminated).map((player) => player.id));
+    if (effectsReady && lastOut) {
+      const back = state.players.filter((player) => lastOut.has(player.id) && !outNow.has(player.id));
+      if (back.length) {
+        snd.sfx('revive');
+        fx.banner(`💚 ${back.map((player) => player.name).join(' and ')} ${back.length > 1 ? 'are' : 'is'} back!`);
+      }
+    }
+    lastOut = outNow;
     playEffects(killed);
 
     // Musikk følger fasen. Lyder ved fasebytte spilles bare live, ikke ved omlasting.
@@ -298,6 +312,7 @@
     const nightReady = state.activeCount >= 3 && (phase === 'result' || (phase === 'ready' && validPick));
     $('night-start').hidden = !nightReady;
     $('night-end-btn').hidden = phase !== 'night';
+    $('revive-btn').hidden = !(['ready', 'result', 'over'].includes(phase) && state.players.some((player) => player.eliminated));
     $('kill-btn').hidden = !((phase === 'ready' && validPick) || phase === 'result');
     $('end-btn').hidden = finished || phase === 'night';
     $('again-btn').hidden = !finished;
@@ -510,6 +525,48 @@
     killer = { open: false, target: null };
     $('kill-modal').hidden = true;
   }
+
+  // Dialog for å hente en spiller tilbake.
+  function renderReviver() {
+    $('revive-modal').hidden = !reviver.open;
+    if (!reviver.open || !state) return;
+    $('revive-list').innerHTML = state.players
+      .filter((player) => player.eliminated)
+      .map((player, index) => `<li><button type="button" class="row pick${reviver.target === player.id ? ' imp' : ''}" style="--i:${index}" data-id="${esc(player.id)}">
+        <div class="avatar">${avatarHtml(player)}</div>
+        <div class="name"><span class="t">${esc(player.name)}</span></div>
+        ${reviver.target === player.id ? '<span class="pill ok">💚 Back</span>' : ''}</button></li>`)
+      .join('');
+    $('revive-confirm').disabled = !reviver.target;
+  }
+  function openReviver() {
+    reviver = { open: true, target: null };
+    renderReviver();
+  }
+  function closeReviver() {
+    reviver = { open: false, target: null };
+    $('revive-modal').hidden = true;
+  }
+  $('revive-btn').addEventListener('click', openReviver);
+  $('revive-cancel').addEventListener('click', closeReviver);
+  $('revive-list').addEventListener('click', (event) => {
+    const button = event.target.closest('.pick');
+    if (!button) return;
+    reviver.target = button.dataset.id;
+    renderReviver();
+  });
+  $('revive-confirm').addEventListener('click', async () => {
+    if (!reviver.target) return;
+    $('revive-confirm').disabled = true;
+    try {
+      await api.rpc('imposter_revive_player', { p_code: info.code, p_host_secret: info.secret, p_player: reviver.target });
+      closeReviver();
+    } catch (error) {
+      toast(error.message);
+      renderReviver();
+    }
+    if (watcher) watcher.refresh();
+  });
 
   $('kill-btn').addEventListener('click', openKiller);
   $('kill-cancel').addEventListener('click', closeKiller);

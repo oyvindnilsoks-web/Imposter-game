@@ -77,6 +77,7 @@
         </div>
         <button class="btn secondary" id="kill-btn" hidden>💀 Someone was killed</button>
         <button class="btn secondary" id="night-end-btn" hidden>End the night now</button>
+        <button class="btn secondary" id="revive-btn" hidden>💚 Bring someone back</button>
         <button class="btn" id="vote-btn" hidden></button>
         <button class="btn secondary" id="close-btn" hidden>Close vote now</button>
         <div class="hint" id="action-hint"></div>
@@ -119,6 +120,18 @@
       <div class="modal-actions">
         <button type="button" class="btn secondary" id="kill-cancel">Cancel</button>
         <button type="button" class="btn" id="kill-confirm" disabled>Confirm</button>
+      </div>
+    </div>
+  </div>
+  <!-- Hent en spiller tilbake i spillet. Alle ser hvem som er tilbake. -->
+  <div class="modal" id="revive-modal" role="dialog" aria-modal="true" aria-labelledby="revive-title" hidden>
+    <div class="modal-card">
+      <h2 id="revive-title">Who comes back?</h2>
+      <p class="lead">The player is in the game again, and everyone sees it.</p>
+      <ul class="list grid" id="revive-list"></ul>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="revive-cancel">Cancel</button>
+        <button type="button" class="btn" id="revive-confirm" disabled>Bring back</button>
       </div>
     </div>
   </div>

@@ -857,3 +857,84 @@ test('players cannot be removed after the game has started, or when they do not 
   );
   assert.equal((await state(game)).players.length, 4);
 });
+
+// ---- Bring players back
+
+const revive = (game, player) =>
+  rpc('imposter_revive_player', { p_code: game.code, p_host_secret: game.hostSecret, p_player: game.players[player].id });
+const killIdx = (game, player) =>
+  rpc('imposter_kill_player', { p_code: game.code, p_host_secret: game.hostSecret, p_player: game.players[player].id });
+
+test('the host can bring a killed player back, and the kill is forgotten', async () => {
+  const game = await readyGame(6, [0]);
+  await killIdx(game, 3);
+  let s = await state(game);
+  assert.equal(who(game, s, 3).eliminated, true);
+  assert.deepEqual(s.killedIds, [game.players[3].id]);
+
+  await revive(game, 3);
+  s = await state(game);
+  assert.equal(who(game, s, 3).eliminated, false);
+  assert.equal(s.killedIds, null);
+  assert.equal(s.activeCount, 6);
+  assert.equal(s.phase, 'ready');
+});
+
+test('only the host can bring someone back, and only someone who is out', async () => {
+  const game = await readyGame(6, [0]);
+  await killIdx(game, 3);
+  await assert.rejects(
+    rpc('imposter_revive_player', { p_code: game.code, p_host_secret: 'x'.repeat(20), p_player: game.players[3].id }),
+    /Only the host/,
+  );
+  await assert.rejects(revive(game, 2), /Invalid choice/, 'a player who is in cannot be revived');
+});
+
+test('it is not possible during a vote, the night or the lobby', async () => {
+  const lobby = await newGame(4);
+  await assert.rejects(revive(lobby, 1), /between rounds/);
+  const game = await readyGame(6, [0]);
+  await startNight(game);
+  await assert.rejects(revive(game, 1), /between rounds/);
+  await host(game, 'imposter_close_night');
+  await host(game, 'imposter_start_vote');
+  await assert.rejects(revive(game, 1), /between rounds/);
+});
+
+test('a game that ended by a mistaken kill goes on when the player is brought back', async () => {
+  const game = await readyGame(3, [0]);
+  await startNight(game);
+  await pick(game, 0, 1);
+  let s = await state(game);
+  assert.equal(s.phase, 'over');
+  assert.equal(s.winner, 'impostors');
+
+  await revive(game, 1);
+  s = await state(game);
+  assert.equal(s.phase, 'ready', 'the game is on again');
+  assert.equal(s.winner, null);
+  assert.equal(s.activeCount, 3);
+  await host(game, 'imposter_start_vote');
+  assert.equal((await state(game)).phase, 'voting');
+});
+
+test('bringing back a player after a vote returns to the result, and the game goes on if it was only won by that player', async () => {
+  const game = await startVoting(5, [0]);
+  await castAll(game, [[0, 1], [1, 2], [2, 1], [3, 1], [4, 1]]);
+  let s = await state(game);
+  assert.equal(s.phase, 'result');
+  assert.equal(who(game, s, 1).eliminated, true);
+  await revive(game, 1);
+  s = await state(game);
+  assert.equal(s.phase, 'result');
+  assert.equal(who(game, s, 1).eliminated, false);
+
+  // Reviving an impostor so they are as many as the crew ends the game for the impostors
+  const g2 = await startVoting(5, [0, 1]);
+  await castAll(g2, [[0, 2], [1, 2], [3, 2], [4, 2], [2, 0]]);
+  // 2 impostors and 3 crew start, one crew voted out: 2 against 2 -> impostors win
+  assert.equal((await state(g2)).winner, 'impostors');
+  await revive(g2, 2);
+  s = await state(g2);
+  assert.equal(s.phase, 'result', 'with the crew back the game goes on');
+});

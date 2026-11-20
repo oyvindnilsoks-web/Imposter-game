@@ -13,6 +13,7 @@
   let nightMax = 1; // lengste gjenstående tid vi har sett i natten, til fremdriftsstolpen
   let nightNo = 0;
   let series = 0;
+  let lastOut = null; // hvem som var ute sist, for å se at noen kommer tilbake
   let taskOpen = false; // oppgaveskjermen er åpen
   let task = null; // oppgaven som vises
   let built = []; // ordene eleven har trykket inn (setninger)
@@ -328,6 +329,7 @@
       series = state.series;
       played.clear();
       seen.clear();
+      lastOut = null;
     }
     pendingSeen = [];
 
@@ -347,6 +349,17 @@
     } else if (quietNight) {
       $('kill-note').textContent = quietText;
     }
+    // Noen er tilbake i spillet
+    const outNow = new Set(state.players.filter((player) => player.eliminated).map((player) => player.id));
+    if (effectsReady && lastOut) {
+      const back = state.players.filter((player) => lastOut.has(player.id) && !outNow.has(player.id));
+      if (back.length) {
+        fx.banner(back.some((player) => player.id === self.id)
+          ? '💚 You are back in the game!'
+          : `💚 ${back.map((player) => player.name).join(' and ')} ${back.length > 1 ? 'are' : 'is'} back!`);
+      }
+    }
+    lastOut = outNow;
     playEffects(self, killed);
     // De som er ute får en lenke til Glosemester, mens spillet pågår
     $('out-note').hidden = !(self.eliminated && ['ready', 'night', 'voting', 'result'].includes(phase));

@@ -159,6 +159,10 @@ window.ImposterSound = (() => {
       tone({ note: 76, start: t, length: 0.35, type: 'triangle', gain: 0.14, to: sfxBus });
       tone({ note: 76, start: t + 0.22, length: 0.45, type: 'triangle', gain: 0.14, to: sfxBus });
     },
+    revive: (t) => {
+      swoosh(t, 0.9, 400, 2400, 0.07);
+      [64, 67, 72, 76, 79].forEach((note, i) => tone({ note, start: t + i * 0.1, length: 1, type: 'triangle', gain: 0.12, to: sfxBus }));
+    },
     out: (t) => [67, 63, 58].forEach((note, i) => tone({ note, start: t + i * 0.2, length: 0.7, type: 'triangle', gain: 0.13, to: sfxBus })),
     tie: (t) => {
       tone({ note: 64, start: t, length: 0.4, type: 'triangle', gain: 0.12, to: sfxBus });
