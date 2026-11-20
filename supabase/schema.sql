@@ -820,6 +820,28 @@ begin
 end;
 $$;
 
+-- Host: remove a player from the lobby (for example someone who joined twice, or with a name that
+-- does not belong). Only possible before the game starts. The player is sent back to the join page.
+create or replace function imposter_remove_player(p_code text, p_host_secret text, p_player uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+begin
+  if v_game.phase <> 'lobby' then
+    raise exception 'You can only remove players in the lobby.';
+  end if;
+  delete from imposter_players where id = p_player and game_code = v_game.code;
+  if not found then
+    raise exception 'Invalid choice.';
+  end if;
+  update imposter_games set updated_at = now() where code = v_game.code;
+end;
+$$;
+
 -- Host: end the game for everyone.
 create or replace function imposter_end_game(p_code text, p_host_secret text)
 returns void
@@ -1149,6 +1171,7 @@ revoke all on function imposter_start_game(text, text) from public;
 revoke all on function imposter_start_vote(text, text) from public;
 revoke all on function imposter_cast_vote(text, text, uuid) from public;
 revoke all on function imposter_close_vote(text, text) from public;
+revoke all on function imposter_remove_player(text, text, uuid) from public;
 revoke all on function imposter_end_game(text, text) from public;
 revoke all on function imposter_set_impostors(text, text, uuid[]) from public;
 revoke all on function imposter_kill_player(text, text, uuid) from public;
@@ -1168,6 +1191,7 @@ grant execute on function imposter_start_game(text, text) to anon, authenticated
 grant execute on function imposter_start_vote(text, text) to anon, authenticated;
 grant execute on function imposter_cast_vote(text, text, uuid) to anon, authenticated;
 grant execute on function imposter_close_vote(text, text) to anon, authenticated;
+grant execute on function imposter_remove_player(text, text, uuid) to anon, authenticated;
 grant execute on function imposter_end_game(text, text) to anon, authenticated;
 grant execute on function imposter_set_impostors(text, text, uuid[]) to anon, authenticated;
 grant execute on function imposter_kill_player(text, text, uuid) to anon, authenticated;

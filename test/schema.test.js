@@ -825,3 +825,35 @@ test('the pot starts over with a new round', async () => {
   assert.equal(after.pot.level, 0);
   assert.equal(after.clueIds, null);
 });
+
+test('the host can remove a player in the lobby, and the name is free again', async () => {
+  const game = await newGame(4);
+  const gone = game.players[1];
+  await assert.rejects(
+    rpc('imposter_remove_player', { p_code: game.code, p_host_secret: 'x'.repeat(20), p_player: gone.id }),
+    /Only the host/,
+  );
+  await rpc('imposter_remove_player', { p_code: game.code, p_host_secret: game.hostSecret, p_player: gone.id });
+  const s = await state(game, 0);
+  assert.equal(s.players.length, 3);
+  assert.ok(!s.players.some((player) => player.id === gone.id));
+  const after = await rpc('imposter_get_state', { p_code: game.code, p_secret: gone.secret, p_host_secret: null });
+  assert.equal(after.meId, null, 'the removed player is no longer a player');
+
+  const again = await rpc('imposter_join_game', { p_code: game.code, p_name: 'Player 1', p_secret: secret() });
+  assert.ok(again.playerId, 'the name can be used again');
+});
+
+test('players cannot be removed after the game has started, or when they do not exist', async () => {
+  const game = await newGame(4);
+  await assert.rejects(
+    rpc('imposter_remove_player', { p_code: game.code, p_host_secret: game.hostSecret, p_player: crypto.randomUUID() }),
+    /Invalid choice/,
+  );
+  await host(game, 'imposter_start_game');
+  await assert.rejects(
+    rpc('imposter_remove_player', { p_code: game.code, p_host_secret: game.hostSecret, p_player: game.players[0].id }),
+    /only remove players in the lobby/,
+  );
+  assert.equal((await state(game)).players.length, 4);
+});

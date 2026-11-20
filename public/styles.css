@@ -774,3 +774,7 @@ body.has-peek .sheet { padding-bottom: 104px; }
 .imp-random .chip { min-width: 48px; padding: 10px 0; text-align: center; font-weight: 700; }
 .imp-random .chip.on { border-color: var(--orange); background: #fff7e8; }
 .imp-random .chip:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Fjern spiller (bare i lobbyen, på lærerskjermen) */
+.remove-btn { flex: none; width: 34px; height: 34px; margin-left: 8px; border: 0; border-radius: 50%; font: inherit; font-size: 15px; line-height: 1; color: var(--muted); background: #fff; cursor: pointer; }
+.remove-btn:hover, .remove-btn:focus-visible { color: #fff; background: var(--danger); }

@@ -121,7 +121,7 @@
     const inner = `${bar}
       <div class="num">${String(index + 1).padStart(2, '0')}</div>
       <div class="avatar">${avatarHtml(player)}</div>
-      <div class="name"><span class="t">${esc(player.name)}</span></div>${pill}`;
+      <div class="name"><span class="t">${esc(player.name)}</span></div>${pill}${state.phase === 'lobby' ? `<button type="button" class="remove-btn" data-remove="${esc(player.id)}" aria-label="Remove ${esc(player.name)}">✕</button>` : ''}`;
 
     return `<li class="${classes.join(' ')}" style="--i:${index}">${inner}</li>`;
   }
@@ -514,6 +514,20 @@
     } catch (error) {
       toast(error.message);
       renderKiller();
+    }
+    if (watcher) watcher.refresh();
+  });
+
+  // Fjern en spiller fra lobbyen (for eksempel en som er med to ganger).
+  $('players').addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-remove]');
+    if (!button || !state) return;
+    const player = state.players.find((p) => p.id === button.dataset.remove);
+    if (!player || !confirm(`Remove ${player.name} from the game?`)) return;
+    try {
+      await api.rpc('imposter_remove_player', { p_code: info.code, p_host_secret: info.secret, p_player: player.id });
+    } catch (error) {
+      toast(error.message);
     }
     if (watcher) watcher.refresh();
   });
