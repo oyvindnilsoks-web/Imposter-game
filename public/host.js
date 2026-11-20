@@ -18,6 +18,7 @@
   let closing = false;
   let picker = { open: false, shown: false, random: false, draft: new Set() }; // impostor-dialogen, skjult til læreren trykker Show
   let reviver = { open: false, target: null }; // dialogen for hvem som kommer tilbake
+  let lastPot = null; // potten sist, for å se at noe blir ødelagt
   let lastOut = null; // hvem som var ute sist, for å se at noen kommer tilbake
   let killer = { open: false, target: null }; // dialogen for hvem som ble drept
   const seen = new Set();
@@ -101,6 +102,19 @@
     return true;
   }
 
+  // Vote reveal (nivå 5): hvem som stemte på hvem i runden som er ferdig.
+  function votersOf(player) {
+    if (!state.votes || !['result', 'over'].includes(state.phase)) return '';
+    const byId = new Map(state.players.map((p) => [p.id, p]));
+    const chips = state.votes
+      .filter((vote) => vote.targetId === player.id)
+      .map((vote) => byId.get(vote.voterId))
+      .filter(Boolean)
+      .map((voter) => `<span class="voter"><span class="avatar">${avatarHtml(voter)}</span>${esc(voter.name)}</span>`)
+      .join('');
+    return chips ? `<small class="voters">${chips}</small>` : '';
+  }
+
   function playerRow(player, index, { result, showImpostors }) {
     const impostor = showImpostors && (state.impostorIds || []).includes(player.id);
     const classes = ['row'];
@@ -123,11 +137,12 @@
     }
     if (impostor) pill += '<span class="pill imp">🎭 Impostor</span>';
     else if (!player.eliminated && (state.clueIds || []).includes(player.id)) pill += '<span class="pill ok">✅ Crew</span>';
+    else if (!player.eliminated && (state.detectiveIds || []).includes(player.id)) pill += '<span class="pill sus">🕵️ Suspect</span>';
 
     const inner = `${bar}
       <div class="num">${String(index + 1).padStart(2, '0')}</div>
       <div class="avatar">${avatarHtml(player)}</div>
-      <div class="name"><span class="t">${esc(player.name)}</span></div>${pill}${state.phase === 'lobby' ? `<button type="button" class="remove-btn" data-remove="${esc(player.id)}" aria-label="Remove ${esc(player.name)}">✕</button>` : ''}`;
+      <div class="name"><span class="t">${esc(player.name)}</span>${votersOf(player)}</div>${pill}${state.phase === 'lobby' ? `<button type="button" class="remove-btn" data-remove="${esc(player.id)}" aria-label="Remove ${esc(player.name)}">✕</button>` : ''}`;
 
     return `<li class="${classes.join(' ')}" style="--i:${index}">${inner}</li>`;
   }
@@ -159,11 +174,26 @@
       });
     }
     const pot = state.pot;
-    if (pot && pot.level >= 1) {
-      const clue = state.players.find((player) => (state.clueIds || [])[0] === player.id);
-      once(`level1-${state.code}`, () => snd.sfx('clue') || fx.banner(clue ? `🔎 Clue! ${clue.name} is crew.` : '🔎 Clue unlocked'));
+    const names = (ids) => (ids || []).map((id) => (byId.get(id) || {}).name).filter(Boolean).join(', ');
+    const LEVEL_TEXT = {
+      1: () => { const clue = byId.get((state.clueIds || [])[0]); return clue ? `🔎 Clue! ${clue.name} is crew.` : '🔎 Clue unlocked'; },
+      2: () => '🛡️ Shield ready. The next kill will fail.',
+      3: () => `🕵️ Detective! At least one impostor is among: ${names(state.detectiveIds)}.`,
+      4: () => '💚 Revive ready. The next crew member who goes out comes back.',
+      5: () => '🗳️ Vote reveal! Now you can see who voted for whom.',
+      6: () => '⚖️ Double vote ready. Crew votes count twice in the next vote.',
+    };
+    for (let level = 1; pot && level <= pot.level && level <= 6; level++) {
+      if (level === 3 && !state.detectiveIds) continue;
+      once(`level${level}-${state.code}`, () => { snd.sfx(level === 1 ? 'clue' : 'level'); fx.banner(LEVEL_TEXT[level]()); });
     }
-    if (pot && pot.level >= 2) once(`level2-${state.code}`, () => snd.sfx('level') || fx.banner('🛡️ Shield ready. The next kill will fail.'));
+    // Noen har ødelagt noe fra potten
+    if (lastPot && pot) {
+      if (lastPot.shield && !pot.shield && !(state.nightResult && state.nightResult.shielded)) { snd.sfx('kill'); fx.banner('💥 The shield was broken!'); }
+      if (pot.points < lastPot.points) fx.banner('🕳️ Someone stole points from the pot!');
+    }
+    lastPot = pot ? { shield: pot.shield, points: pot.points } : null;
+    if (phase === 'voting' && state.doubleRound) once(`double-${state.code}-${state.round}`, () => { snd.sfx('vote'); fx.banner('⚖️ Double vote! Crew votes count twice.'); });
     if (['ready', 'result'].includes(phase) && state.nightResult && state.nightResult.shielded) {
       once(`shield-${state.code}-${state.nightResult.night}`, () => snd.sfx('shield') || fx.banner('🛡️ The shield saved someone!'));
     }
@@ -182,6 +212,7 @@
       played.clear();
       seen.clear();
       lastOut = null;
+      lastPot = null;
     }
     pendingSeen = [];
     $('screen-create').hidden = true;
@@ -294,7 +325,9 @@
     $('list-count').textContent = phase === 'lobby' || phase === 'ready'
       ? `${state.players.length} joined`
       : `${state.activeCount} left of ${state.players.length}`;
-    $('players').innerHTML = state.players
+    // De som er igjen ligger øverst, de som er ute nederst (ellers i den rekkefølgen de ble med).
+    const ordered = [...state.players].sort((a, b) => Number(a.eliminated) - Number(b.eliminated));
+    $('players').innerHTML = ordered
       .map((player, index) => playerRow(player, index, { result, showImpostors }))
       .join('');
 

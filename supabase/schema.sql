@@ -90,6 +90,17 @@ alter table imposter_games add column if not exists shield_ready boolean not nul
 alter table imposter_games add column if not exists clue_ids uuid[];
 alter table imposter_players add column if not exists current_task integer;
 
+-- More help from the pot (levels 3 to 6), and the impostors' secret missions and cards.
+alter table imposter_games add column if not exists detective_ids uuid[];
+alter table imposter_games add column if not exists revive_charges integer not null default 0;
+alter table imposter_games add column if not exists double_vote_ready boolean not null default false;
+alter table imposter_games add column if not exists double_round boolean not null default false;
+alter table imposter_games add column if not exists double_kill_ready boolean not null default false;
+alter table imposter_players add column if not exists eliminated_at timestamptz;
+alter table imposter_players add column if not exists mission jsonb;
+alter table imposter_players add column if not exists card text;
+alter table imposter_players add column if not exists missions_done integer not null default 0;
+
 -- The tasks. The answers stay here: the browser only gets the question and the choices.
 create table if not exists imposter_tasks (
   id serial primary key,
@@ -218,7 +229,10 @@ begin
   -- Only the candidates are counted (everyone in a normal round, the tied players in a runoff).
   for r in
     select p.id,
-           (select count(*) from imposter_votes v
+           -- With the double vote from the pot, every crew vote counts twice.
+           (select coalesce(sum(case when v_game.double_round and not vp.is_impostor then 2 else 1 end), 0)
+              from imposter_votes v
+              join imposter_players vp on vp.id = v.voter_id
              where v.game_code = v_game.code and v.round = v_game.round and v.target_id = p.id) as n
       from imposter_players p
      where p.game_code = v_game.code and not p.eliminated
@@ -244,7 +258,7 @@ begin
   end if;
 
   if v_out is not null then
-    update imposter_players set eliminated = true where id = v_out;
+    update imposter_players set eliminated = true, eliminated_at = now() where id = v_out;
 
     -- The crew wins when all impostors are out. The impostors win when they are as many as the crew.
     select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
@@ -262,12 +276,28 @@ begin
   select count(*) into v_cast
     from imposter_votes where game_code = v_game.code and round = v_game.round;
 
+  -- Impostor missions: voting for the crew member who was voted out, and staying in the game.
+  if v_out is not null and not (select is_impostor from imposter_players where id = v_out) then
+    for r in
+      select v.voter_id from imposter_votes v join imposter_players p on p.id = v.voter_id
+       where v.game_code = v_game.code and v.round = v_game.round and v.target_id = v_out and p.is_impostor
+    loop
+      perform imposter_mission_step(r.voter_id, 'vote_hit');
+    end loop;
+  end if;
+  for r in
+    select id from imposter_players where game_code = v_game.code and is_impostor and not eliminated
+  loop
+    perform imposter_mission_step(r.id, 'survive');
+  end loop;
+
   update imposter_games
      set phase = v_phase,
          winner = v_winner,
          runoff_ids = v_runoff,
          killed_ids = null,
          night_result = null,
+         double_round = false,
          vote_count = v_cast,
          result = jsonb_build_object(
            'round', v_game.round,
@@ -275,10 +305,16 @@ begin
            'eliminatedId', v_out,
            'tie', v_tie,
            'votesCast', v_cast,
-           'runoffIds', to_jsonb(v_runoff)
+           'runoffIds', to_jsonb(v_runoff),
+           'doubled', v_game.double_round
          ),
          updated_at = now()
    where code = v_game.code;
+
+  -- A revive from the pot brings back a crew member who was just voted out.
+  if v_out is not null and not (select is_impostor from imposter_players where id = v_out) then
+    perform imposter_try_revive(v_game.code);
+  end if;
 end;
 $$;
 
@@ -417,6 +453,12 @@ begin
     raise exception 'Invalid choice.';
   end if;
   update imposter_players set is_impostor = (id = any(v_ids)) where game_code = v_game.code;
+  -- Every impostor gets a secret mission. The others have none.
+  update imposter_players
+     set mission = case when id = any(v_ids) then imposter_new_mission() else null end,
+         card = null,
+         missions_done = 0
+   where game_code = v_game.code;
   update imposter_games set updated_at = now() where code = v_game.code;
 end;
 $$;
@@ -462,6 +504,8 @@ begin
          vote_count = 0,
          runoff_ids = null,
          night_result = null,
+         double_round = double_vote_ready,
+         double_vote_ready = false,
          updated_at = now()
    where code = v_game.code;
 end;
@@ -484,7 +528,7 @@ declare
   v_runoff uuid[];
 begin
   select * into v_game from imposter_games where code = p_code;
-  update imposter_players set eliminated = true where id = p_player;
+  update imposter_players set eliminated = true, eliminated_at = now() where id = p_player;
 
   select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
     into v_crew, v_impostors
@@ -510,6 +554,11 @@ begin
          killed_ids = coalesce(killed_ids, '{}') || p_player,
          updated_at = now()
    where code = v_game.code;
+
+  -- A revive from the pot brings a crew member straight back.
+  if not (select is_impostor from imposter_players where id = p_player) then
+    perform imposter_try_revive(v_game.code);
+  end if;
 end;
 $$;
 
@@ -553,8 +602,10 @@ declare
   v_game imposter_games;
   v_alive integer;
   v_target uuid;
+  v_second uuid;
   v_back text;
   v_shielded boolean := false;
+  r record;
 begin
   select * into v_game from imposter_games where code = p_code;
   select count(*) into v_alive
@@ -569,10 +620,33 @@ begin
   having count(*) * 2 > v_alive
    limit 1;
 
+  -- The double kill card: the second most picked player dies too.
+  if v_target is not null and v_game.double_kill_ready then
+    select n.target_id into v_second
+      from imposter_night_picks n
+      join imposter_players i on i.id = n.impostor_id and not i.eliminated
+      join imposter_players t on t.id = n.target_id and not t.eliminated and not t.is_impostor
+     where n.game_code = v_game.code and n.target_id <> v_target
+     group by n.target_id
+     order by count(*) desc, random()
+     limit 1;
+  end if;
+
   -- A shield from the pot stops the kill, once.
   if v_target is not null and v_game.shield_ready then
     v_target := null;
+    v_second := null;
     v_shielded := true;
+  end if;
+
+  -- Impostor mission: picked a player who died.
+  if v_target is not null then
+    for r in
+      select impostor_id from imposter_night_picks
+       where game_code = v_game.code and (target_id = v_target or target_id = v_second)
+    loop
+      perform imposter_mission_step(r.impostor_id, 'night_kill');
+    end loop;
   end if;
 
   v_back := case when v_game.round > 0 then 'result' else 'ready' end;
@@ -581,13 +655,17 @@ begin
   update imposter_games
      set phase = v_back,
          night_ends_at = null,
-         night_result = jsonb_build_object('night', v_game.night_no, 'killedId', v_target, 'shielded', v_shielded),
+         night_result = jsonb_build_object('night', v_game.night_no, 'killedId', v_target, 'killedId2', v_second, 'shielded', v_shielded),
          shield_ready = shield_ready and not v_shielded,
+         double_kill_ready = false,
          updated_at = now()
    where code = v_game.code;
 
   if v_target is not null then
     perform imposter_kill_internal(v_game.code, v_target, v_back);
+  end if;
+  if v_second is not null then
+    perform imposter_kill_internal(v_game.code, v_second, v_back);
   end if;
 end;
 $$;
@@ -797,7 +875,10 @@ begin
   delete from imposter_votes where game_code = v_game.code;
   delete from imposter_night_picks where game_code = v_game.code;
   delete from imposter_task_log where game_code = v_game.code;
-  update imposter_players set eliminated = false, is_impostor = false, current_task = null where game_code = v_game.code;
+  update imposter_players
+     set eliminated = false, is_impostor = false, current_task = null,
+         eliminated_at = null, mission = null, card = null, missions_done = 0
+   where game_code = v_game.code;
   update imposter_games
      set phase = 'lobby',
          round = 0,
@@ -814,6 +895,11 @@ begin
          pot_level = 0,
          shield_ready = false,
          clue_ids = null,
+         detective_ids = null,
+         revive_charges = 0,
+         double_vote_ready = false,
+         double_round = false,
+         double_kill_ready = false,
          series = series + 1,
          updated_at = now()
    where code = v_game.code;
@@ -844,27 +930,23 @@ $$;
 
 -- Host: bring a player back into the game (for a mistake, or as a reward). It works between rounds,
 -- and also after the game is over: if the game is no longer over, it goes on from the last result.
-create or replace function imposter_revive_player(p_code text, p_host_secret text, p_player uuid)
+create or replace function imposter_revive_internal(p_code text, p_player uuid)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+  v_game imposter_games;
   v_crew integer;
   v_impostors integer;
-  v_phase text := v_game.phase;
-  v_winner text := v_game.winner;
+  v_phase text;
+  v_winner text;
 begin
-  if v_game.phase not in ('ready', 'result', 'over') then
-    raise exception 'You can bring someone back between rounds.';
-  end if;
-  update imposter_players set eliminated = false
-   where id = p_player and game_code = v_game.code and eliminated;
-  if not found then
-    raise exception 'Invalid choice.';
-  end if;
+  select * into v_game from imposter_games where code = p_code;
+  v_phase := v_game.phase;
+  v_winner := v_game.winner;
+  update imposter_players set eliminated = false, eliminated_at = null where id = p_player;
 
   if exists (select 1 from imposter_players where game_code = v_game.code and is_impostor) then
     select count(*) filter (where not is_impostor), count(*) filter (where is_impostor)
@@ -888,6 +970,54 @@ begin
          killed_ids = nullif(array_remove(killed_ids, p_player), '{}'),
          updated_at = now()
    where code = v_game.code;
+end;
+$$;
+
+-- A revive from the pot: the crew member who went out last comes back.
+create or replace function imposter_try_revive(p_code text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_player uuid;
+begin
+  if (select revive_charges from imposter_games where code = p_code) <= 0 then
+    return;
+  end if;
+  select id into v_player from imposter_players
+   where game_code = p_code and eliminated and not is_impostor
+   order by eliminated_at desc nulls last, id
+   limit 1;
+  if v_player is null then
+    return;
+  end if;
+  perform imposter_revive_internal(p_code, v_player);
+  update imposter_games set revive_charges = revive_charges - 1 where code = p_code;
+end;
+$$;
+
+-- Host: bring a player back into the game (for a mistake, or as a reward). It works between rounds,
+-- and also after the game is over: if the game is no longer over, it goes on from the last result.
+create or replace function imposter_revive_player(p_code text, p_host_secret text, p_player uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games := imposter_lock_host_game(p_code, p_host_secret);
+begin
+  if v_game.phase not in ('ready', 'result', 'over') then
+    raise exception 'You can bring someone back between rounds.';
+  end if;
+  if not exists (
+    select 1 from imposter_players where id = p_player and game_code = v_game.code and eliminated
+  ) then
+    raise exception 'Invalid choice.';
+  end if;
+  perform imposter_revive_internal(v_game.code, p_player);
 end;
 $$;
 
@@ -924,7 +1054,155 @@ returns integer[]
 language sql
 immutable
 as $$
-  select array[ceil(1.5 * p_players)::integer, ceil(3.5 * p_players)::integer];
+  select array[
+    ceil(3.0 * p_players)::integer,
+    ceil(6.0 * p_players)::integer,
+    ceil(10.0 * p_players)::integer,
+    ceil(15.0 * p_players)::integer,
+    ceil(21.0 * p_players)::integer,
+    ceil(28.0 * p_players)::integer
+  ];
+$$;
+
+-- What each level of the pot gives: 1 clue, 2 shield, 3 detective, 4 revive, 5 vote reveal, 6 double vote.
+create or replace function imposter_unlock_level(p_code text, p_level integer)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games;
+  v_pick uuid;
+  v_impostor uuid;
+  v_total integer;
+  v_alive integer;
+  v_size integer;
+  v_group uuid[];
+begin
+  select * into v_game from imposter_games where code = p_code;
+  if p_level = 1 then
+    -- Clue: one crew member who is still in is shown to everyone as crew.
+    select id into v_pick from imposter_players
+     where game_code = p_code and not eliminated and not is_impostor
+       and not (id = any(coalesce(v_game.clue_ids, '{}')))
+     order by random() limit 1;
+    if v_pick is not null then
+      update imposter_games set clue_ids = coalesce(clue_ids, '{}') || v_pick where code = p_code;
+    end if;
+  elsif p_level = 2 then
+    update imposter_games set shield_ready = true where code = p_code;
+  elsif p_level = 3 then
+    -- Detective: a group of about 20 percent of the players, with at least one impostor in it.
+    select count(*), count(*) filter (where not eliminated) into v_total, v_alive
+      from imposter_players where game_code = p_code;
+    v_size := least(greatest(3, ceil(0.2 * v_total)::integer), v_alive);
+    select id into v_impostor from imposter_players
+     where game_code = p_code and is_impostor and not eliminated
+     order by random() limit 1;
+    if v_impostor is not null then
+      select coalesce(array_agg(id), '{}') into v_group from (
+        select id from imposter_players
+         where game_code = p_code and not eliminated and id <> v_impostor
+         order by random() limit v_size - 1
+      ) others;
+      update imposter_games set detective_ids = v_group || v_impostor where code = p_code;
+    end if;
+  elsif p_level = 4 then
+    update imposter_games set revive_charges = revive_charges + 1 where code = p_code;
+    perform imposter_try_revive(p_code);
+  elsif p_level = 6 then
+    update imposter_games set double_vote_ready = true where code = p_code;
+  end if;
+end;
+$$;
+
+-- A new secret mission for an impostor.
+create or replace function imposter_new_mission()
+returns jsonb
+language sql
+volatile
+as $$
+  select (array[
+    jsonb_build_object('type', 'vote_hit', 'goal', 1, 'progress', 0),
+    jsonb_build_object('type', 'night_kill', 'goal', 1, 'progress', 0),
+    jsonb_build_object('type', 'survive', 'goal', 2, 'progress', 0)
+  ])[1 + floor(random() * 3)::integer];
+$$;
+
+-- One step of an impostor's mission. When it is done, the impostor gets a card.
+create or replace function imposter_mission_step(p_player uuid, p_type text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_mission jsonb;
+  v_cards text[] := array['double_kill', 'break_shield', 'steal'];
+begin
+  select mission into v_mission from imposter_players where id = p_player;
+  if v_mission is null or v_mission ->> 'type' <> p_type then
+    return;
+  end if;
+  v_mission := jsonb_set(v_mission, '{progress}', to_jsonb((v_mission ->> 'progress')::integer + 1));
+  if (v_mission ->> 'progress')::integer >= (v_mission ->> 'goal')::integer then
+    update imposter_players
+       set mission = null, card = v_cards[1 + floor(random() * 3)::integer], missions_done = missions_done + 1
+     where id = p_player;
+  else
+    update imposter_players set mission = v_mission where id = p_player;
+  end if;
+end;
+$$;
+
+-- Impostor: use your card, at night. Double kill makes the next night kill two players, break shield
+-- removes the crew's shield, and steal takes points from the pot. A new mission follows.
+create or replace function imposter_use_card(p_code text, p_secret text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_game imposter_games;
+  v_me imposter_players;
+  v_players integer;
+begin
+  select * into v_game from imposter_games where code = upper(btrim(p_code)) for update;
+  if not found then
+    raise exception 'Game not found. Check the code.';
+  end if;
+  if v_game.phase <> 'night' then
+    raise exception 'You can only use a card at night.';
+  end if;
+  select * into v_me from imposter_players where game_code = v_game.code and secret = p_secret;
+  if not found or not v_me.is_impostor or v_me.eliminated then
+    raise exception 'Only the impostors can use cards.';
+  end if;
+  if v_me.card is null then
+    raise exception 'You have no card.';
+  end if;
+
+  if v_me.card = 'double_kill' then
+    if v_game.double_kill_ready then
+      raise exception 'A double kill is already ready.';
+    end if;
+    update imposter_games set double_kill_ready = true where code = v_game.code;
+  elsif v_me.card = 'break_shield' then
+    if not v_game.shield_ready then
+      raise exception 'There is no shield to break.';
+    end if;
+    update imposter_games set shield_ready = false where code = v_game.code;
+  elsif v_me.card = 'steal' then
+    select count(*) into v_players from imposter_players where game_code = v_game.code;
+    update imposter_games set pot = greatest(0, pot - ceil(2.0 * v_players)::integer) where code = v_game.code;
+  end if;
+
+  update imposter_players set card = null, mission = imposter_new_mission() where id = v_me.id;
+  update imposter_games set updated_at = now() where code = v_game.code;
+  return v_me.card;
+end;
 $$;
 
 -- Player: get the task to solve. You keep the same task until you have answered it.
@@ -987,7 +1265,7 @@ security definer
 set search_path = public
 as $$
 declare
-  c_cap constant integer := 6;
+  c_cap constant integer := 4;
   v_game imposter_games;
   v_me imposter_players;
   v_task imposter_tasks;
@@ -997,7 +1275,6 @@ declare
   v_goals integer[];
   v_pot integer;
   v_level integer;
-  v_clue uuid;
 begin
   select * into v_game from imposter_games where code = upper(btrim(p_code)) for update;
   if not found then
@@ -1030,24 +1307,12 @@ begin
     v_pot := v_game.pot + 1;
     v_level := v_game.pot_level;
     v_goals := imposter_pot_goals((select count(*) from imposter_players where game_code = v_game.code)::integer);
-    while v_level < 2 and v_pot >= v_goals[v_level + 1] loop
+    while v_level < 6 and v_pot >= v_goals[v_level + 1] loop
       v_level := v_level + 1;
-      if v_level = 1 then
-        -- Clue: one crew member who is still in is shown to everyone as crew.
-        select id into v_clue from imposter_players
-         where game_code = v_game.code and not eliminated and not is_impostor
-           and not (id = any(coalesce(v_game.clue_ids, '{}')))
-         order by random() limit 1;
-        if v_clue is not null then
-          v_game.clue_ids := coalesce(v_game.clue_ids, '{}') || v_clue;
-        end if;
-      else
-        v_game.shield_ready := true;
-      end if;
+      perform imposter_unlock_level(v_game.code, v_level);
     end loop;
     update imposter_games
-       set pot = v_pot, pot_level = v_level, clue_ids = v_game.clue_ids,
-           shield_ready = v_game.shield_ready, updated_at = now()
+       set pot = v_pot, pot_level = v_level, updated_at = now()
      where code = v_game.code;
   end if;
 
@@ -1083,6 +1348,9 @@ declare
   v_mates jsonb;
   v_night jsonb;
   v_picks jsonb;
+  v_mission jsonb;
+  v_card text;
+  v_vote_list jsonb;
 begin
   select * into v_game from imposter_games where code = upper(btrim(p_code));
   if not found then
@@ -1132,6 +1400,17 @@ begin
         into v_mates
         from imposter_players where game_code = v_game.code and is_impostor and id <> v_me;
     end if;
+  end if;
+
+  -- Only an impostor sees their own mission and card.
+  if v_me is not null and v_my_impostor then
+    select mission, card into v_mission, v_card from imposter_players where id = v_me;
+  end if;
+
+  -- Vote reveal (level 5): who voted for whom in the round that just ended.
+  if v_game.pot_level >= 5 and v_game.phase in ('result', 'over') and v_game.result is not null then
+    select coalesce(jsonb_agg(jsonb_build_object('voterId', voter_id, 'targetId', target_id)), '[]'::jsonb)
+      into v_vote_list from imposter_votes where game_code = v_game.code and round = v_game.round;
   end if;
 
   if v_game.phase = 'night' then
@@ -1190,8 +1469,15 @@ begin
       'points', v_game.pot,
       'level', v_game.pot_level,
       'goals', to_jsonb(imposter_pot_goals((select count(*) from imposter_players where game_code = v_game.code)::integer)),
-      'shield', v_game.shield_ready
+      'shield', v_game.shield_ready,
+      'revive', v_game.revive_charges,
+      'doubleVote', v_game.double_vote_ready
     ) end,
+    'detectiveIds', to_jsonb(v_game.detective_ids),
+    'doubleRound', case when v_game.phase = 'voting' then v_game.double_round else null end,
+    'votes', v_vote_list,
+    'mission', v_mission,
+    'card', v_card,
     'clueIds', to_jsonb(v_game.clue_ids),
     'canTask', case when v_me is null then false else (
       select imposter_can_task(v_game.phase, p.eliminated, p.is_impostor) from imposter_players p where p.id = v_me
@@ -1233,6 +1519,12 @@ revoke all on function imposter_answer_task(text, text, integer, text) from publ
 revoke all on function imposter_can_task(text, boolean, boolean) from public, anon, authenticated;
 revoke all on function imposter_pot_goals(integer) from public, anon, authenticated;
 revoke all on function imposter_new_round(text, text) from public;
+revoke all on function imposter_use_card(text, text) from public;
+revoke all on function imposter_revive_internal(text, uuid) from public, anon, authenticated;
+revoke all on function imposter_try_revive(text) from public, anon, authenticated;
+revoke all on function imposter_unlock_level(text, integer) from public, anon, authenticated;
+revoke all on function imposter_new_mission() from public, anon, authenticated;
+revoke all on function imposter_mission_step(uuid, text) from public, anon, authenticated;
 revoke all on function imposter_get_state(text, text, text) from public;
 
 grant execute on function imposter_create_game(text) to anon, authenticated;
@@ -1253,6 +1545,8 @@ grant execute on function imposter_close_night(text, text) to anon, authenticate
 grant execute on function imposter_new_round(text, text) to anon, authenticated;
 grant execute on function imposter_next_task(text, text) to anon, authenticated;
 grant execute on function imposter_answer_task(text, text, integer, text) to anon, authenticated;
+
+grant execute on function imposter_use_card(text, text) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Tasks (A1-A2). Safe to run again: tasks that already exist are skipped.

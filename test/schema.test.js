@@ -756,17 +756,17 @@ test('impostors who are out do not add points, and nobody can tell', async () =>
   assert.equal((await state(game)).pot.points, before);
 });
 
-test('one player can add at most 6 points in a round', async () => {
+test('one player can add at most 4 points in a round', async () => {
   const game = await nightGame(9, [0, 1]);
   let capped = null;
   for (let i = 0; i < 8; i++) capped = (await solve(game, 5)).capped;
-  assert.equal((await state(game)).pot.points, 6);
+  assert.equal((await state(game)).pot.points, 4);
   assert.equal(capped, true);
 });
 
 test('the goals grow with the number of players', async () => {
   const game = await nightGame(10, [0, 1]);
-  assert.deepEqual((await state(game)).pot.goals, [15, 35]);
+  assert.deepEqual((await state(game)).pot.goals, [30, 60, 100, 150, 210, 280]);
 });
 
 test('level 1 shows one crew member who is in to everyone, as a clue', async () => {
@@ -937,4 +937,243 @@ test('bringing back a player after a vote returns to the result, and the game go
   await revive(g2, 2);
   s = await state(g2);
   assert.equal(s.phase, 'result', 'with the crew back the game goes on');
+});
+
+// ---- More levels in the pot, and the impostors' missions and cards
+
+const setPot = (game, points, level) =>
+  db.query('update imposter_games set pot = $2, pot_level = $3 where code = $1', [game.code, points, level]);
+const setMission = (game, player, mission) =>
+  db.query('update imposter_players set mission = $2, card = null where id = $1', [game.players[player].id, JSON.stringify(mission)]);
+const setCard = (game, player, card) =>
+  db.query('update imposter_players set card = $2, mission = null where id = $1', [game.players[player].id, card]);
+const useCard = (game, player) =>
+  rpc('imposter_use_card', { p_code: game.code, p_secret: game.players[player].secret });
+const goalsOf = async (game) => (await state(game)).pot.goals;
+
+test('level 3, the detective, shows a group with at least one impostor in it', async () => {
+  const game = await nightGame(10, [0, 1]);
+  const goals = await goalsOf(game);
+  await setPot(game, goals[2] - 1, 2);
+  assert.equal((await state(game)).detectiveIds, null);
+  await solve(game, 5);
+  const s = await state(game);
+  assert.equal(s.pot.level, 3);
+  assert.equal(s.detectiveIds.length, 3, '20 percent of 10 is 2, but never fewer than 3');
+  const ids = s.detectiveIds;
+  assert.ok(ids.includes(game.players[0].id) || ids.includes(game.players[1].id), 'an impostor is in the group');
+  assert.equal(new Set(ids).size, 3);
+  assert.deepEqual((await state(game, 3)).detectiveIds, ids, 'everyone sees the group');
+});
+
+test('level 4, the revive, brings back the crew member who went out last', async () => {
+  const game = await readyGame(10, [0, 1]);
+  await killIdx(game, 4);
+  await startNight(game);
+  const goals = await goalsOf(game);
+  await setPot(game, goals[3] - 1, 3);
+  await solve(game, 5);
+  const s = await state(game);
+  assert.equal(s.pot.level, 4);
+  assert.equal(who(game, s, 4).eliminated, false, 'the player is back');
+  assert.equal(s.pot.revive, 0, 'the revive is used');
+  assert.equal(s.killedIds, null);
+});
+
+test('a revive that nobody can use waits, and saves the next crew member who goes out', async () => {
+  const game = await nightGame(10, [0, 1]);
+  const goals = await goalsOf(game);
+  await setPot(game, goals[3] - 1, 3);
+  await solve(game, 5);
+  assert.equal((await state(game)).pot.revive, 1, 'nobody is out, so it waits');
+
+  await pick(game, 0, 6);
+  await pick(game, 1, 6);
+  const s = await state(game);
+  assert.equal(who(game, s, 6).eliminated, false, 'the kill was undone by the revive');
+  assert.equal(s.pot.revive, 0);
+});
+
+test('the revive never brings back an impostor', async () => {
+  const game = await startVoting(8, [0]);
+  await db.query('update imposter_games set revive_charges = 1 where code = $1', [game.code]);
+  await castAll(game, [[0, 1], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0]]);
+  const s = await state(game);
+  assert.equal(who(game, s, 0).eliminated, true);
+  assert.equal(s.pot.revive, 1, 'the revive is still waiting for a crew member');
+});
+
+test('level 5 shows who voted for whom, and level 6 doubles the crew votes once', async () => {
+  const game = await readyGame(6, [0, 1]);
+  const goals = await goalsOf(game);
+  // Without level 5 nobody sees the votes
+  await host(game, 'imposter_start_vote');
+  await castAll(game, [[0, 3], [1, 3], [2, 3], [3, 4], [4, 3], [5, 3]]);
+  let s = await state(game);
+  assert.equal(who(game, s, 3).eliminated, true);
+  assert.equal(s.votes, null, 'no reveal before level 5');
+
+  // Level 6 arms the double vote
+  await startNight(game);
+  await setPot(game, goals[5] - 1, 5);
+  await solve(game, 4).catch(() => {});
+  s = await state(game);
+  if (s.pot.level < 6) {
+    await db.query('update imposter_games set double_vote_ready = true, pot_level = 6 where code = $1', [game.code]);
+  }
+  assert.equal((await state(game)).pot.doubleVote, true);
+  await host(game, 'imposter_close_night');
+  await host(game, 'imposter_start_vote');
+  s = await state(game);
+  assert.equal(s.doubleRound, true);
+  assert.equal(s.pot.doubleVote, false, 'the double vote is used up when the vote starts');
+  const alive = game.players.map((player, index) => index).filter((index) => !who(game, s, index).eliminated);
+  // Everyone who is in votes: impostors for one player, the crew for another, doubled
+  const target = alive.find((index) => ![0, 1].includes(index));
+  const other = alive.find((index) => ![0, 1].includes(index) && index !== target);
+  for (const index of alive) {
+    if ([0, 1].includes(index)) await vote(game, index, other);
+    else if (index !== target) await vote(game, index, target);
+    else await vote(game, index, other);
+  }
+  s = await state(game);
+  assert.equal(s.result.doubled, true);
+  const crewVotes = alive.filter((index) => ![0, 1].includes(index) && index !== target).length;
+  assert.equal(s.result.counts[game.players[target].id], crewVotes * 2, 'every crew vote counts twice');
+  assert.equal(s.doubleRound, null);
+  assert.ok(Array.isArray(s.votes) && s.votes.length === alive.length, 'level 6 includes level 5, the votes are shown');
+});
+
+test('impostors get a secret mission, nobody else does', async () => {
+  const game = await readyGame(6, [0, 1]);
+  const imp = await state(game, 0);
+  assert.ok(['vote_hit', 'night_kill', 'survive'].includes(imp.mission.type));
+  assert.equal(imp.mission.progress, 0);
+  assert.equal(imp.card, null);
+  assert.equal((await state(game, 3)).mission, null, 'crew have no mission');
+  assert.equal((await state(game)).mission, null, 'nobody without a key sees any');
+  assert.equal((await state(game, null, true)).mission, null, 'not even the host');
+  // A new pick of impostors gives new missions
+  await setImpostors(game, [2]);
+  assert.equal((await state(game, 0)).mission, null);
+  assert.ok((await state(game, 2)).mission);
+});
+
+test('mission: vote for the crew member who is voted out', async () => {
+  const game = await startVoting(8, [0]);
+  await setMission(game, 0, { type: 'vote_hit', goal: 1, progress: 0 });
+  await castAll(game, [[0, 3], [1, 3], [2, 3], [3, 4], [4, 5], [5, 3], [6, 3], [7, 3]]);
+  const s = await state(game, 0);
+  assert.equal(who(game, s, 3).eliminated, true);
+  assert.equal(s.mission, null, 'the mission is done');
+  assert.ok(['double_kill', 'break_shield', 'steal'].includes(s.card), 'and gives a card');
+});
+
+test('mission: pick the player who dies in the night', async () => {
+  const game = await readyGame(8, [0, 1]);
+  await setMission(game, 0, { type: 'night_kill', goal: 1, progress: 0 });
+  await setMission(game, 1, { type: 'night_kill', goal: 1, progress: 0 });
+  await startNight(game);
+  await pick(game, 0, 4);
+  await pick(game, 1, 4);
+  assert.ok((await state(game, 0)).card);
+  assert.ok((await state(game, 1)).card);
+});
+
+test('mission: staying in the game for two votes', async () => {
+  const game = await startVoting(6, [0]);
+  await setMission(game, 0, { type: 'survive', goal: 2, progress: 0 });
+  await castAll(game, [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 1]]);
+  let s = await state(game, 0);
+  assert.deepEqual(s.mission, { type: 'survive', goal: 2, progress: 1 });
+  await host(game, 'imposter_start_vote');
+  await host(game, 'imposter_close_vote');
+  s = await state(game, 0);
+  assert.equal(s.mission, null);
+  assert.ok(s.card);
+});
+
+test('cards can only be used at night by an impostor who is in and has one', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await setCard(game, 0, 'steal');
+  await assert.rejects(useCard(game, 0), /only use a card at night/);
+  await startNight(game);
+  await assert.rejects(useCard(game, 3), /Only the impostors/);
+  await assert.rejects(useCard(game, 1), /no card/);
+  const pot = await goalsOf(game);
+  assert.ok(pot.length === 6);
+});
+
+test('the steal card takes points from the pot and gives a new mission', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await setCard(game, 0, 'steal');
+  await startNight(game);
+  await setPot(game, 30, 1);
+  assert.equal(await useCard(game, 0), 'steal');
+  const s = await state(game);
+  assert.equal(s.pot.points, 18, 'twice the number of players is taken, 12');
+  assert.equal(s.pot.level, 1, 'levels that are reached stay');
+  const mine = await state(game, 0);
+  assert.equal(mine.card, null);
+  assert.ok(mine.mission, 'a new mission follows');
+  await setPot(game, 5, 1);
+  await setCard(game, 1, 'steal');
+  await useCard(game, 1);
+  assert.equal((await state(game)).pot.points, 0, 'never below zero');
+});
+
+test('the break shield card removes the shield, and only when there is one', async () => {
+  const game = await readyGame(6, [0, 1]);
+  await setCard(game, 0, 'break_shield');
+  await startNight(game);
+  await assert.rejects(useCard(game, 0), /no shield to break/);
+  await db.query('update imposter_games set shield_ready = true where code = $1', [game.code]);
+  assert.equal((await state(game)).pot.shield, true);
+  await useCard(game, 0);
+  assert.equal((await state(game)).pot.shield, false);
+  await pick(game, 0, 3);
+  await pick(game, 1, 3);
+  assert.equal(who(game, await state(game), 3).eliminated, true, 'the kill works without the shield');
+});
+
+test('the double kill card makes the night kill the two most picked players', async () => {
+  const game = await readyGame(9, [0, 1, 2]);
+  await setCard(game, 0, 'double_kill');
+  await startNight(game);
+  await useCard(game, 0);
+  await assert.rejects(useCard(game, 0), /no card/);
+  await pick(game, 0, 4);
+  await pick(game, 1, 4);
+  await pick(game, 2, 5);
+  const s = await state(game);
+  assert.equal(s.phase, 'ready');
+  assert.equal(who(game, s, 4).eliminated, true);
+  assert.equal(who(game, s, 5).eliminated, true, 'the second most picked dies too');
+  assert.deepEqual(new Set(s.killedIds), new Set([game.players[4].id, game.players[5].id]));
+  // It is used up
+  await startNight(game);
+  await pick(game, 0, 6);
+  await pick(game, 1, 6);
+  await pick(game, 2, 7);
+  const s2 = await state(game);
+  assert.equal(who(game, s2, 6).eliminated, true);
+  assert.equal(who(game, s2, 7).eliminated, false, 'only one dies without a card');
+});
+
+test('a new round clears the pot levels, the missions and the cards', async () => {
+  const game = await readyGame(3, [0]);
+  await setCard(game, 0, 'steal');
+  await startNight(game);
+  await pick(game, 0, 1);
+  assert.equal((await state(game)).phase, 'over');
+  await db.query('update imposter_games set pot = 9, pot_level = 3, detective_ids = $2, revive_charges = 1, double_vote_ready = true where code = $1', [game.code, `{${game.players[1].id}}`]);
+  await host(game, 'imposter_new_round');
+  await host(game, 'imposter_start_game');
+  await setImpostors(game, [1]);
+  const s = await state(game);
+  assert.equal(s.pot.points, 0);
+  assert.equal(s.pot.revive, 0);
+  assert.equal(s.pot.doubleVote, false);
+  assert.equal(s.detectiveIds, null);
+  assert.equal((await state(game, 0)).card, null);
 });

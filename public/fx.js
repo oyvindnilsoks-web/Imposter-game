@@ -146,13 +146,13 @@ window.ImposterFx = (() => {
   }
 
   // Det felles potten: en stolpe med to nivåmerker. Brukes av både elev- og vertssiden.
-  const LEVELS = ['🔎 Clue', '🛡️ Shield'];
+  const LEVELS = ['🔎 Clue', '🛡️ Shield', '🕵️ Detective', '💚 Revive', '🗳️ Vote reveal', '⚖️ Double vote'];
   function potHtml(pot) {
     if (!pot) return '';
     const max = pot.goals[pot.goals.length - 1];
     const next = pot.level < LEVELS.length ? `Next: ${LEVELS[pot.level]} at ${pot.goals[pot.level]}` : 'All help is unlocked';
     const marks = pot.goals.map((goal, index) => `<span class="pot-mark${pot.level > index ? ' on' : ''}" style="left:${(goal / max) * 100}%" title="${LEVELS[index]}">${LEVELS[index].split(' ')[0]}</span>`).join('');
-    const shield = pot.shield ? '<span class="pill ok">🛡️ Shield ready</span>' : '';
+    const shield = `${pot.shield ? '<span class="pill ok">🛡️ Shield ready</span> ' : ''}${pot.revive > 0 ? '<span class="pill ok">💚 Revive waiting</span> ' : ''}${pot.doubleVote ? '<span class="pill ok">⚖️ Double vote ready</span>' : ''}`;
     return `<div class="pot-head"><strong>Team pot</strong><span>${pot.points} points</span></div>
       <div class="pot-track"><div class="pot-fill" style="width:${Math.min(100, (pot.points / max) * 100)}%"></div>${marks}</div>
       <div class="pot-next">${next} ${shield}</div>`;
