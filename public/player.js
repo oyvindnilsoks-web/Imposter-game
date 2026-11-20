@@ -290,7 +290,11 @@
 
   function render() {
     const self = state && state.players.find((player) => player.id === state.meId);
-    if (!self) return showJoin();
+    if (!self) {
+      // Læreren har fjernet deg, eller spillet har ikke deg. Du kan melde deg på igjen.
+      clearSession();
+      return showJoin('You are not in this game. You can join again, or ask your teacher.');
+    }
     // Ny runde med de samme spillerne: effektene og inngangsanimasjonene starter på nytt.
     if (state.series !== series) {
       series = state.series;
